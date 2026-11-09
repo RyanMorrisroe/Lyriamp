@@ -1,0 +1,66 @@
+name: Android CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager --install "platforms;android-37" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run tests, lint, builds, and coverage
+        run: >-
+          bash ./gradlew --no-daemon
+          :app:testDebugUnitTest
+          :app:testReleaseUnitTest
+          :app:lintDebug
+          :app:assembleDebug
+          :app:assembleRelease
+          :app:koverHtmlReportDebug
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-and-coverage-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/tests/testReleaseUnitTest/
+            app/build/test-results/testDebugUnitTest/
+            app/build/test-results/testReleaseUnitTest/
+            app/build/reports/kover/htmlDebug/
+            app/build/reports/lint-results-debug.*
+          if-no-files-found: warn
+          retention-days: 7
