@@ -1,6 +1,8 @@
 package com.ryanmorrisroe.lyriamp.data.persistence
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.core.DataStoreFactory
+import androidx.datastore.core.okio.OkioStorage
+import androidx.datastore.preferences.core.PreferencesSerializer
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.CoroutineScope
@@ -9,6 +11,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -21,9 +25,15 @@ class DataStoreSavedServerRepositoryTest {
         val directory = Files.createTempDirectory("lyriamp-saved-servers").toFile()
         val dataStoreScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         try {
-            val dataStore = PreferenceDataStoreFactory.create(
+            val dataStore = DataStoreFactory.create(
+                storage = OkioStorage(
+                    fileSystem = FileSystem.SYSTEM,
+                    serializer = PreferencesSerializer,
+                    producePath = {
+                        File(directory, "saved_servers.preferences_pb").absolutePath.toPath()
+                    }
+                ),
                 scope = dataStoreScope,
-                produceFile = { File(directory, "saved_servers.preferences_pb") }
             )
             val repository = DataStoreSavedServerRepository(dataStore, TestCredentialCipher())
             val connection = com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection(

@@ -4,10 +4,13 @@ import android.app.Application
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayerStore
 import com.ryanmorrisroe.lyriamp.data.lms.LmsConnectionGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsJsonRpcClient
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerDirectory
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerRemoteGateway
 import com.ryanmorrisroe.lyriamp.data.persistence.AndroidKeystoreCredentialCipher
 import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreSavedServerRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreLastSessionRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.SavedServerRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.savedServerDataStore
 import io.ktor.client.HttpClient
@@ -22,12 +25,17 @@ class LyriampApplication : Application() {
             AndroidKeystoreCredentialCipher()
         )
     }
+    val lastSessionRepository: LastSessionRepository by lazy {
+        DataStoreLastSessionRepository(applicationContext.savedServerDataStore)
+    }
 
     lateinit var connectionGateway: LmsConnectionGateway
         private set
     lateinit var playerDirectory: LmsPlayerDirectory
         private set
     lateinit var playerRemoteGateway: LmsPlayerRemoteGateway
+        private set
+    lateinit var libraryGateway: LmsLibraryGateway
         private set
 
     override fun onCreate() {
@@ -44,5 +52,6 @@ class LyriampApplication : Application() {
         connectionGateway = lmsJsonRpcClient
         playerDirectory = lmsJsonRpcClient
         playerRemoteGateway = lmsJsonRpcClient
+        libraryGateway = lmsJsonRpcClient
     }
 }

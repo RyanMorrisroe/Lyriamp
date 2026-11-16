@@ -55,7 +55,7 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
 
 @Composable
 @SuppressLint("InlinedApi")
-fun ConnectionScreen(viewModel: ConnectionViewModel) {
+fun ConnectionScreen(viewModel: ConnectionViewModel, onPlayerSelected: () -> Unit = {}) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showLocalNetworkRationale by remember { mutableStateOf(false) }
@@ -298,6 +298,7 @@ fun ConnectionScreen(viewModel: ConnectionViewModel) {
                             ListItem(
                                 modifier = Modifier.clickable(enabled = player.connected) {
                                     viewModel.selectPlayer(player.id)
+                                    onPlayerSelected()
                                 },
                                 headlineContent = { Text(player.name) },
                                 supportingContent = {

@@ -42,6 +42,40 @@ android {
     }
 }
 
+kover {
+    currentProject {
+        createVariant("core") {
+            add("debug")
+        }
+    }
+    reports {
+        variant("core") {
+            filters {
+                includes {
+                    classes(
+                        "com.ryanmorrisroe.lyriamp.data.lms.*",
+                        "com.ryanmorrisroe.lyriamp.data.persistence.*",
+                        "com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel",
+                        "com.ryanmorrisroe.lyriamp.feature.library.LibraryCategory",
+                        "com.ryanmorrisroe.lyriamp.feature.library.LibraryLocation",
+                        "com.ryanmorrisroe.lyriamp.feature.library.LibraryUiState",
+                        "com.ryanmorrisroe.lyriamp.feature.library.LibraryViewModel*",
+                        "com.ryanmorrisroe.lyriamp.feature.library.LmsLibrary*PagingSource"
+                    )
+                }
+                excludes {
+                    classes("com.ryanmorrisroe.lyriamp.data.persistence.AndroidKeystoreCredentialCipher*")
+                }
+            }
+            verify {
+                rule {
+                    minBound(90)
+                }
+            }
+        }
+    }
+}
+
 dependencies {
     //Base Android
     implementation(platform(libs.androidx.compose.bom))
@@ -53,10 +87,13 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.graphics.path)
+    implementation(libs.androidx.paging.compose)
+    implementation(libs.androidx.paging.runtime)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.concurrent.futures)
+    implementation(libs.androidx.navigation.compose)
 
     // Networking
     implementation(libs.ktor.client.android)
