@@ -114,6 +114,65 @@ class ConnectionViewModelTest {
     }
 
     @Test
+    fun successfulConnectionAutomaticallySavesProfile() {
+        runViewModelTest {
+            val savedServerRepository = FakeSavedServerRepository()
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", 1) },
+                LmsPlayerDirectory { emptyList() },
+                unusedPlayerRemoteGateway(),
+                savedServerRepository = savedServerRepository
+            )
+            viewModel.onHostChanged("lms.local")
+
+            viewModel.testConnection()
+            advanceUntilIdle()
+
+            assertEquals("server-1", viewModel.uiState.value.serverProfileId)
+            assertEquals("lms.local", viewModel.uiState.value.savedServers.single().host)
+        }
+    }
+
+    @Test
+    fun failedConnectionDoesNotSaveProfile() {
+        runViewModelTest {
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { throw IllegalStateException("offline") },
+                LmsPlayerDirectory { emptyList() },
+                unusedPlayerRemoteGateway(),
+                savedServerRepository = FakeSavedServerRepository()
+            )
+            viewModel.onHostChanged("lms.local")
+
+            viewModel.testConnection()
+            advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.savedServers.isEmpty())
+            assertNull(viewModel.uiState.value.serverProfileId)
+        }
+    }
+
+    @Test
+    fun connectingToSavedProfileReturnsConnectionResult() {
+        runViewModelTest {
+            val savedServerRepository = FakeSavedServerRepository()
+            val connection = LmsServerConnection("lms.local")
+            val profile = savedServerRepository.save(connection)
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", 1) },
+                LmsPlayerDirectory { emptyList() },
+                unusedPlayerRemoteGateway(),
+                savedServerRepository = savedServerRepository
+            )
+
+            assertTrue(viewModel.connectSavedServer(profile.id))
+
+            assertEquals(connection, viewModel.uiState.value.activeConnection)
+            assertEquals(profile.id, viewModel.uiState.value.serverProfileId)
+        }
+    }
+
+    @Test
     fun invalidPortDoesNotCallGateway() {
         runViewModelTest {
             var requestCount = 0
@@ -274,6 +333,156 @@ class ConnectionViewModelTest {
     }
 
     @Test
+    fun refreshingPlayerStatusPublishesTheLatestPosition() {
+        runViewModelTest {
+            var positionSeconds = 12.0
+            val remoteGateway = object : LmsPlayerRemoteGateway {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerStatus(
+                    LmsPlaybackMode.PLAYING,
+                    "Track",
+                    "Artist",
+                    "Album",
+                    positionSeconds,
+                    180.0,
+                    true
+                )
+
+                override suspend fun getPlayerMixerState(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerMixerState(50, false)
+
+                override suspend fun getPlayerPlaybackOptions(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerPlaybackOptions(LmsShuffleMode.OFF, LmsRepeatMode.OFF)
+
+                override suspend fun sendCommand(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    command: LmsPlayerCommand
+                ) = Unit
+            }
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", 1) },
+                LmsPlayerDirectory {
+                    listOf(LmsPlayer("aa:bb", "Living Room", "Squeezebox", true, true))
+                },
+                remoteGateway
+            )
+            viewModel.onHostChanged("lms.local")
+            viewModel.testConnection()
+            advanceUntilIdle()
+            viewModel.selectPlayer("aa:bb")
+            advanceUntilIdle()
+
+            positionSeconds = 13.0
+            viewModel.refreshPlayerStatus()
+
+            assertEquals(13.0, viewModel.uiState.value.playerStatus?.positionSeconds ?: 0.0, 0.0)
+        }
+    }
+
+    @Test
+    fun playerReadFailuresAreReportedIndependentlyAndOnRefresh() {
+        runViewModelTest {
+            val remoteGateway = object : LmsPlayerRemoteGateway {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ): LmsPlayerStatus = throw IllegalStateException("status unavailable")
+
+                override suspend fun getPlayerMixerState(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ): LmsPlayerMixerState = throw IllegalStateException("mixer unavailable")
+
+                override suspend fun getPlayerPlaybackOptions(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ): LmsPlayerPlaybackOptions = throw IllegalStateException("options unavailable")
+
+                override suspend fun sendCommand(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    command: LmsPlayerCommand
+                ) = Unit
+            }
+            val viewModel = connectedViewModel(remoteGateway)
+            advanceUntilIdle()
+
+            viewModel.selectPlayer("aa:bb")
+            advanceUntilIdle()
+
+            assertEquals("Could not read this player's status.", viewModel.uiState.value.playerErrorMessage)
+            assertEquals("Could not read this player's volume.", viewModel.uiState.value.playerMixerErrorMessage)
+            assertEquals(
+                "Could not read this player's shuffle and repeat settings.",
+                viewModel.uiState.value.playerPlaybackOptionsErrorMessage
+            )
+            assertFalse(viewModel.uiState.value.isLoadingPlayerStatus)
+            assertFalse(viewModel.uiState.value.isLoadingMixerState)
+            assertFalse(viewModel.uiState.value.isLoadingPlaybackOptions)
+
+            viewModel.refreshPlayerStatus()
+
+            assertEquals("Could not read this player's status.", viewModel.uiState.value.playerErrorMessage)
+        }
+    }
+
+    @Test
+    fun commandAndPowerFailuresClearPendingStateAndReportErrors() {
+        runViewModelTest {
+            val remoteGateway = object : LmsPlayerRemoteGateway {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerStatus(LmsPlaybackMode.STOPPED, null, null, null, 0.0, null, false)
+
+                override suspend fun getPlayerMixerState(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerMixerState(50, false)
+
+                override suspend fun getPlayerPlaybackOptions(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerPlaybackOptions(LmsShuffleMode.OFF, LmsRepeatMode.OFF)
+
+                override suspend fun sendCommand(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    command: LmsPlayerCommand
+                ) = throw IllegalStateException("command failed")
+            }
+            val viewModel = connectedViewModel(remoteGateway)
+            advanceUntilIdle()
+            viewModel.selectPlayer("aa:bb")
+            advanceUntilIdle()
+
+            viewModel.sendPlayerCommand(LmsPlayerCommand.SetVolume(25))
+            advanceUntilIdle()
+
+            assertFalse(viewModel.uiState.value.isSendingPlayerCommand)
+            assertFalse(viewModel.uiState.value.isLoadingMixerState)
+            assertEquals("The player command could not be completed.", viewModel.uiState.value.playerErrorMessage)
+            assertEquals("Could not refresh this player's volume.", viewModel.uiState.value.playerMixerErrorMessage)
+
+            viewModel.setPlayerPower("aa:bb", false)
+            advanceUntilIdle()
+
+            assertNull(viewModel.uiState.value.powerUpdatingPlayerId)
+            assertEquals(
+                "Could not change this player's power state.",
+                viewModel.uiState.value.playerPowerErrorMessage
+            )
+        }
+    }
+
+    @Test
     fun powerCommandRefreshesPlayerAndClearsActiveTargetWhenPoweredOff() {
         runViewModelTest {
             var poweredOn = true
@@ -349,6 +558,17 @@ class ConnectionViewModelTest {
             playerId: String,
             command: LmsPlayerCommand
         ) = error("Unexpected player command")
+    }
+
+    private fun connectedViewModel(remoteGateway: LmsPlayerRemoteGateway) = ConnectionViewModel(
+        LmsConnectionGateway { LmsServerInfo("9.2.0", 1) },
+        LmsPlayerDirectory {
+            listOf(LmsPlayer("aa:bb", "Living Room", "Squeezebox", true, true))
+        },
+        remoteGateway
+    ).apply {
+        onHostChanged("lms.local")
+        testConnection()
     }
 
     private class FakeSavedServerRepository : SavedServerRepository {

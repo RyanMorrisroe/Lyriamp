@@ -38,6 +38,7 @@ data class ConnectionUiState(
     val serverInfo: LmsServerInfo? = null,
     val players: List<LmsPlayer> = emptyList(),
     val activeConnection: LmsServerConnection? = null,
+    val serverProfileId: String? = null,
     val selectedPlayerId: String? = null,
     val playerStatus: LmsPlayerStatus? = null,
     val playerMixerState: LmsPlayerMixerState? = null,
@@ -135,9 +136,13 @@ class ConnectionViewModel(
         }
         viewModelScope.launch {
             try {
-                repository.save(connection)
+                val savedProfile = repository.save(connection)
                 mutableUiState.update {
-                    it.copy(isSavingServer = false, savedServerMessage = "Server saved.")
+                    it.copy(
+                        isSavingServer = false,
+                        serverProfileId = savedProfile.id,
+                        savedServerMessage = "Server saved."
+                    )
                 }
             } catch (exception: CancellationException) {
                 throw exception
@@ -183,6 +188,7 @@ class ConnectionViewModel(
                         useHttps = connection.useHttps,
                         username = connection.username.orEmpty(),
                         password = connection.password.orEmpty(),
+                        serverProfileId = id,
                         isLoadingSavedServer = false,
                         serverInfo = null,
                         players = emptyList(),
@@ -326,6 +332,38 @@ class ConnectionViewModel(
         }
     }
 
+    fun refreshSelectedPlayer() {
+        mutableUiState.value.selectedPlayerId?.let(::selectPlayer)
+    }
+
+    suspend fun refreshPlayerStatus() {
+        val currentState = mutableUiState.value
+        val connection = currentState.activeConnection ?: return
+        val playerId = currentState.selectedPlayerId ?: return
+        if (currentState.isSendingPlayerCommand || currentState.isLoadingPlayerStatus) return
+
+        try {
+            val status = playerRemoteGateway.getPlayerStatus(connection, playerId)
+            mutableUiState.update {
+                if (it.selectedPlayerId == playerId && it.activeConnection == connection) {
+                    it.copy(playerStatus = status, playerErrorMessage = null)
+                } else {
+                    it
+                }
+            }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            mutableUiState.update {
+                if (it.selectedPlayerId == playerId && it.activeConnection == connection) {
+                    it.copy(playerErrorMessage = "Could not read this player's status.")
+                } else {
+                    it
+                }
+            }
+        }
+    }
+
     fun sendPlayerCommand(command: LmsPlayerCommand) {
         val currentState = mutableUiState.value
         val connection = currentState.activeConnection ?: return
@@ -459,7 +497,6 @@ class ConnectionViewModel(
     fun testConnection() {
         val currentState = mutableUiState.value
         if (currentState.isConnecting) return
-        activePlayerStore?.clear()
 
         val port = currentState.port.toIntOrNull()
         if (port == null) {
@@ -499,12 +536,74 @@ class ConnectionViewModel(
             return
         }
 
+        startConnection(connection)
+    }
+
+    suspend fun connectSavedServer(id: String): Boolean {
+        val repository = savedServerRepository ?: return false
+        if (mutableUiState.value.isConnecting || mutableUiState.value.isLoadingSavedServer) return false
+        mutableUiState.update {
+            it.copy(
+                isLoadingSavedServer = true,
+                savedServerMessage = null,
+                savedServerErrorMessage = null
+            )
+        }
+        val connection = try {
+            repository.getConnection(id)
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            mutableUiState.update {
+                it.copy(
+                    isLoadingSavedServer = false,
+                    savedServerErrorMessage = "Could not load this server's saved credentials."
+                )
+            }
+            return false
+        }
+        if (connection == null) {
+            mutableUiState.update {
+                it.copy(
+                    isLoadingSavedServer = false,
+                    savedServerErrorMessage = "Saved server could not be found."
+                )
+            }
+            return false
+        }
+        mutableUiState.update {
+            it.copy(
+                host = connection.host,
+                port = connection.port.toString(),
+                useHttps = connection.useHttps,
+                username = connection.username.orEmpty(),
+                password = connection.password.orEmpty(),
+                serverProfileId = id,
+                isLoadingSavedServer = false
+            )
+        }
+        return connectToServer(connection)
+    }
+
+    private fun startConnection(connection: LmsServerConnection) {
+        prepareConnection()
+        viewModelScope.launch { performConnection(connection) }
+    }
+
+    private suspend fun connectToServer(connection: LmsServerConnection): Boolean {
+        prepareConnection()
+        return performConnection(connection)
+    }
+
+    private fun prepareConnection() {
+        activePlayerStore?.clear()
         mutableUiState.update {
             it.copy(
                 isConnecting = true,
                 serverInfo = null,
                 players = emptyList(),
                 activeConnection = null,
+                serverProfileId = null,
                 selectedPlayerId = null,
                 playerStatus = null,
                 playerMixerState = null,
@@ -518,61 +617,67 @@ class ConnectionViewModel(
                 playerPlaybackOptionsErrorMessage = null,
                 powerUpdatingPlayerId = null,
                 playerPowerErrorMessage = null,
-                errorMessage = null
+                errorMessage = null,
+                savedServerErrorMessage = null
             )
         }
-        viewModelScope.launch {
+    }
+
+    private suspend fun performConnection(connection: LmsServerConnection): Boolean {
+        try {
+            val serverInfo = gateway.testConnection(connection)
+            val players = playerDirectory.getPlayers(connection)
+            var profileId: String? = null
+            var saveError: String? = null
             try {
-                val serverInfo = gateway.testConnection(connection)
-                val players = playerDirectory.getPlayers(connection)
-                mutableUiState.update {
-                    it.copy(
-                        isConnecting = false,
-                        serverInfo = serverInfo,
-                        players = players,
-                        activeConnection = connection,
-                        errorMessage = null
-                    )
-                }
+                profileId = savedServerRepository?.save(connection)?.id
             } catch (exception: CancellationException) {
                 throw exception
-            } catch (exception: LmsHttpException) {
-                val message = if (exception.statusCode == 401) {
-                    "Authentication failed. Check your credentials."
-                } else {
-                    "The server returned HTTP ${exception.statusCode}."
-                }
-                mutableUiState.update {
-                    it.copy(
-                        isConnecting = false,
-                        serverInfo = null,
-                        players = emptyList(),
-                        activeConnection = null,
-                        errorMessage = message
-                    )
-                }
-            } catch (_: LmsProtocolException) {
-                mutableUiState.update {
-                    it.copy(
-                        isConnecting = false,
-                        serverInfo = null,
-                        players = emptyList(),
-                        activeConnection = null,
-                        errorMessage = "This does not appear to be a compatible LMS server."
-                    )
-                }
             } catch (_: Exception) {
-                mutableUiState.update {
-                    it.copy(
-                        isConnecting = false,
-                        serverInfo = null,
-                        players = emptyList(),
-                        activeConnection = null,
-                        errorMessage = "Could not reach the server. Check the address and network."
-                    )
-                }
+                saveError = "Connected, but the server profile could not be saved."
             }
+            mutableUiState.update {
+                it.copy(
+                    isConnecting = false,
+                    serverInfo = serverInfo,
+                    players = players,
+                    activeConnection = connection,
+                    serverProfileId = profileId,
+                    savedServerErrorMessage = saveError,
+                    errorMessage = null
+                )
+            }
+            return true
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (exception: LmsHttpException) {
+            val message = if (exception.statusCode == 401) {
+                "Authentication failed. Check your credentials."
+            } else {
+                "The server returned HTTP ${exception.statusCode}."
+            }
+            return failConnection(message)
+        } catch (_: LmsProtocolException) {
+            return failConnection("This does not appear to be a compatible LMS server.")
+        } catch (_: Exception) {
+            return failConnection("Could not reach the server. Check the address and network.")
         }
+    }
+
+    private fun failConnection(message: String): Boolean {
+        mutableUiState.update {
+            it.copy(
+                isConnecting = false,
+                serverInfo = null,
+                players = emptyList(),
+                activeConnection = null,
+                serverProfileId = null,
+                selectedPlayerId = null,
+                playerStatus = null,
+                errorMessage = message
+            )
+        }
+        return false
     }
 
     private inline fun updateInput(crossinline transform: ConnectionUiState.() -> ConnectionUiState) {

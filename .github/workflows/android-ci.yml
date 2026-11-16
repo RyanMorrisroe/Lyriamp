@@ -50,6 +50,8 @@ jobs:
           :app:lintDebug
           :app:assembleDebug
           :app:assembleRelease
+          :app:koverVerifyCore
+          :app:koverHtmlReportCore
           :app:koverHtmlReportDebug
 
       - name: Upload test and coverage reports
@@ -63,6 +65,7 @@ jobs:
             app/build/test-results/testDebugUnitTest/
             app/build/test-results/testReleaseUnitTest/
             app/build/reports/kover/htmlDebug/
+            app/build/reports/kover/htmlCore/
             app/build/reports/lint-results-debug.*
           if-no-files-found: warn
           retention-days: 7

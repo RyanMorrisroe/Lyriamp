@@ -127,6 +127,236 @@ class LmsJsonRpcClientTest {
     }
 
     @Test
+    fun readsBoundedAlbumPagesWithFiltersAndArtwork() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """
+                {"id":1,"result":{"count":101,"albums_loop":[
+                                    {"id":42,"album":"Blue Train","artist":"John Coltrane",
+                   "artwork_track_id":501,"artwork_url":"https://art.example/cover.jpg"}
+                ]}}
+                """.trimIndent()
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.ALBUMS,
+                offset = 50,
+                limit = 40,
+                filter = LmsLibraryFilter(artistId = "7"),
+                search = "blue train"
+            )
+
+            assertEquals(50, page.offset)
+            assertEquals(101, page.totalCount)
+            assertEquals(
+                LmsLibraryItem(
+                    id = "42",
+                    type = LmsLibraryItemType.ALBUM,
+                    title = "Blue Train",
+                    artist = "John Coltrane",
+                    artworkId = "501",
+                    artworkUrl = "https://art.example/cover.jpg"
+                ),
+                page.items.single()
+            )
+            val command = capturedCommand(capturedRequest)
+            assertEquals(
+                listOf("albums", "50", "40", "tags:laJK", "artist_id:7", "search:blue train"),
+                command
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun readsLegacyTitleFieldForAlbumPages() = runBlocking {
+        val client = HttpClient(MockEngine {
+            respondJson(
+                """
+                {"id":1,"result":{"count":1,"albums_loop":[
+                  {"id":42,"title":"Blue Train"}
+                ]}}
+                """.trimIndent()
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.ALBUMS,
+                offset = 0,
+                limit = 10
+            )
+
+            assertEquals("Blue Train", page.items.single().title)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun identifiesPlaylistFoldersFromUrlLikeIds() = runBlocking {
+        val client = HttpClient(MockEngine {
+            respondJson(
+                """{"id":1,"result":{"count":1,"playlists_loop":[
+                  {"id":"file:///music/playlists/Jazz","playlist":"Jazz"}
+                ]}}""".trimIndent()
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                LmsServerConnection("lms.local"),
+                LmsLibraryQuery.PLAYLISTS,
+                offset = 0,
+                limit = 30
+            )
+
+            assertTrue(page.items.single().isContainer)
+            assertEquals(LmsLibraryItemType.PLAYLIST, page.items.single().type)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun searchesArtistsAlbumsAndTracksInBoundedGroups() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """
+                {"id":1,"result":{
+                  "contributors_count":2,"contributors_loop":[{"contributor_id":3,"contributor":"Artist"}],
+                  "albums_count":4,"albums_loop":[{"album_id":5,"album":"Album","artwork":6}],
+                  "tracks_count":8,"tracks_loop":[{"track_id":7,"track":"Track","coverid":8}]
+                }}
+                """.trimIndent()
+            )
+        })
+
+        try {
+            val results = LmsJsonRpcClient(client).search(
+                connection = LmsServerConnection("lms.local"),
+                term = "blue train",
+                offset = 20,
+                limit = 10
+            )
+
+            assertEquals(listOf("Artist"), results.artists.items.map { it.title })
+            assertEquals(2, results.artists.totalCount)
+            assertEquals("6", results.albums.items.single().artworkId)
+            assertEquals("8", results.tracks.items.single().artworkId)
+            assertEquals(8, results.tracks.totalCount)
+            assertEquals(
+                listOf("search", "20", "10", "term:blue train", "extended:1"),
+                capturedCommand(capturedRequest)
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun playsLibraryTracksByReplacingTheCurrentPlaylist() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson("{\"id\":1,\"result\":{}}")
+        })
+
+        try {
+            LmsJsonRpcClient(client).playNow(
+                connection = LmsServerConnection("lms.local"),
+                playerId = "aa:bb:cc:dd:ee:ff",
+                item = LmsLibraryItem("17", LmsLibraryItemType.TRACK, "Track")
+            )
+
+            val requestJson = Json.parseToJsonElement(
+                (capturedRequest?.body as TextContent).text
+            ).jsonObject
+            assertEquals(
+                "aa:bb:cc:dd:ee:ff",
+                requestJson["params"]?.jsonArray?.get(0)?.jsonPrimitive?.content
+            )
+            assertEquals(
+                listOf("playlistcontrol", "cmd:load", "track_id:17"),
+                requestJson["params"]?.jsonArray?.get(1)?.jsonArray?.map {
+                    it.jsonPrimitive.content
+                }
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun playsAlbumsAndPlaylistsByReplacingTheCurrentPlaylist() = runBlocking {
+        val commands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            val requestJson = Json.parseToJsonElement(
+                (request.body as TextContent).text
+            ).jsonObject
+            commands += requestJson["params"]!!.jsonArray[1].jsonArray.map {
+                it.jsonPrimitive.content
+            }
+            respondJson("{\"id\":1,\"result\":{}}")
+        })
+
+        try {
+            val gateway = LmsJsonRpcClient(client)
+            val connection = LmsServerConnection("lms.local")
+            gateway.playNow(
+                connection,
+                "player-1",
+                LmsLibraryItem("album-1", LmsLibraryItemType.ALBUM, "Album")
+            )
+            gateway.playNow(
+                connection,
+                "player-1",
+                LmsLibraryItem("playlist-1", LmsLibraryItemType.PLAYLIST, "Playlist")
+            )
+
+            assertEquals(
+                listOf(
+                    listOf("playlistcontrol", "cmd:load", "album_id:album-1"),
+                    listOf("playlistcontrol", "cmd:load", "playlist_id:playlist-1")
+                ),
+                commands
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun rejectsUnboundedLibraryPages() = runBlocking {
+        val client = HttpClient(MockEngine { error("No request expected") })
+
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    LmsJsonRpcClient(client).getPage(
+                        LmsServerConnection("lms.local"),
+                        LmsLibraryQuery.TRACKS,
+                        offset = 0,
+                        limit = 101
+                    )
+                }
+            }
+            Unit
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun readsPlayerStatusAndMapsTrackMetadata() = runBlocking {
         var capturedRequest: HttpRequestData? = null
         val client = HttpClient(MockEngine { request ->
@@ -313,6 +543,11 @@ class LmsJsonRpcClientTest {
                 malformedClient.close()
             }
         }
+    }
+
+    private fun capturedCommand(request: HttpRequestData?): List<String> {
+        val requestJson = Json.parseToJsonElement((request?.body as TextContent).text).jsonObject
+        return requestJson["params"]!!.jsonArray[1].jsonArray.map { it.jsonPrimitive.content }
     }
 
     private suspend fun MockRequestHandleScope.respondJson(body: String): HttpResponseData =

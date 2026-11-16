@@ -56,6 +56,14 @@ data class LmsServerConnection(
     }
 }
 
+internal fun LmsServerConnection.basicAuthorizationHeader(): String? {
+    val username = username?.takeIf(String::isNotBlank) ?: return null
+    val credentials = "$username:${password.orEmpty()}"
+    val encodedCredentials = Base64.getEncoder()
+        .encodeToString(credentials.toByteArray(Charsets.UTF_8))
+    return "Basic $encodedCredentials"
+}
+
 data class LmsServerInfo(
     val version: String,
     val playerCount: Int
@@ -71,7 +79,7 @@ class LmsProtocolException(message: String, cause: Throwable? = null) : Exceptio
 
 class LmsJsonRpcClient(
     private val httpClient: HttpClient
-) : LmsConnectionGateway, LmsPlayerDirectory, LmsPlayerRemoteGateway {
+) : LmsConnectionGateway, LmsPlayerDirectory, LmsPlayerRemoteGateway, LmsLibraryGateway {
     override suspend fun testConnection(connection: LmsServerConnection): LmsServerInfo {
         val result = request(connection, "", serverStatusCommand())
         val version = result["version"]?.jsonPrimitive?.contentOrNull
@@ -103,6 +111,87 @@ class LmsJsonRpcClient(
                 power = player["power"].asFlag()
             )
         }
+    }
+
+    override suspend fun getPage(
+        connection: LmsServerConnection,
+        query: LmsLibraryQuery,
+        offset: Int,
+        limit: Int,
+        filter: LmsLibraryFilter,
+        search: String?
+    ): LmsLibraryPage {
+        validateLibraryPage(offset, limit)
+        val result = request(connection, "", libraryPageCommand(query, offset, limit, filter, search))
+        val totalCount = result["count"].asInt()
+            ?: throw LmsProtocolException("LMS response did not include a library result count.")
+        return LmsLibraryPage(
+            items = result.libraryItems(
+                query.loopName,
+                query.idField,
+                query.titleField,
+                query.itemType,
+                totalCount,
+                query == LmsLibraryQuery.PLAYLISTS
+            ),
+            offset = offset,
+            totalCount = totalCount
+        )
+    }
+
+    override suspend fun search(
+        connection: LmsServerConnection,
+        term: String,
+        offset: Int,
+        limit: Int
+    ): LmsLibrarySearchResults {
+        validateLibraryPage(offset, limit)
+        require(term.isNotBlank()) { "Enter a search term." }
+        val result = request(connection, "", librarySearchCommand(term, offset, limit))
+        return LmsLibrarySearchResults(
+            artists = result.searchPage(
+                loopName = "contributors_loop",
+                countField = "contributors_count",
+                idField = "contributor_id",
+                titleField = "contributor",
+                itemType = LmsLibraryItemType.ARTIST,
+                offset = offset
+            ),
+            albums = result.searchPage(
+                loopName = "albums_loop",
+                countField = "albums_count",
+                idField = "album_id",
+                titleField = "album",
+                itemType = LmsLibraryItemType.ALBUM,
+                offset = offset,
+                artworkIdFields = arrayOf("artwork")
+            ),
+            tracks = result.searchPage(
+                loopName = "tracks_loop",
+                countField = "tracks_count",
+                idField = "track_id",
+                titleField = "track",
+                itemType = LmsLibraryItemType.TRACK,
+                offset = offset,
+                artworkIdFields = arrayOf("coverid", "artwork_track_id")
+            )
+        )
+    }
+
+    override suspend fun playNow(
+        connection: LmsServerConnection,
+        playerId: String,
+        item: LmsLibraryItem
+    ) {
+        require(!item.isContainer) { "A playlist folder cannot be played." }
+        val filterName = when (item.type) {
+            LmsLibraryItemType.TRACK -> "track_id"
+            LmsLibraryItemType.ALBUM -> "album_id"
+            LmsLibraryItemType.PLAYLIST -> "playlist_id"
+            LmsLibraryItemType.ARTIST,
+            LmsLibraryItemType.GENRE -> throw IllegalArgumentException("This library item cannot be played directly.")
+        }
+        request(connection, playerId, playlistControlCommand("load", filterName, item.id))
     }
 
     override suspend fun getPlayerStatus(
@@ -180,12 +269,8 @@ class LmsJsonRpcClient(
             contentType(ContentType.Application.Json)
             setBody(jsonRpcRequest(playerId, command).toString())
 
-            val username = connection.username
-            if (!username.isNullOrBlank()) {
-                val credentials = "$username:${connection.password.orEmpty()}"
-                val encodedCredentials = Base64.getEncoder()
-                    .encodeToString(credentials.toByteArray(Charsets.UTF_8))
-                header(HttpHeaders.Authorization, "Basic $encodedCredentials")
+            connection.basicAuthorizationHeader()?.let {
+                header(HttpHeaders.Authorization, it)
             }
         }
 
@@ -251,6 +336,49 @@ class LmsJsonRpcClient(
         add(JsonPrimitive("?"))
     }
 
+    private fun libraryPageCommand(
+        query: LmsLibraryQuery,
+        offset: Int,
+        limit: Int,
+        filter: LmsLibraryFilter,
+        search: String?
+    ) = buildJsonArray {
+        query.command.forEach { add(JsonPrimitive(it)) }
+        add(JsonPrimitive(offset))
+        add(JsonPrimitive(limit))
+        when (query) {
+            LmsLibraryQuery.ALBUMS -> add(JsonPrimitive("tags:laJK"))
+            LmsLibraryQuery.TRACKS,
+            LmsLibraryQuery.PLAYLIST_TRACKS -> add(JsonPrimitive("tags:galdeKc"))
+            LmsLibraryQuery.PLAYLISTS -> add(JsonPrimitive("tags:sux"))
+            LmsLibraryQuery.ARTISTS,
+            LmsLibraryQuery.GENRES -> Unit
+        }
+        filter.toQueryParameters().forEach { add(JsonPrimitive(it)) }
+        search?.takeIf(String::isNotBlank)?.let { add(JsonPrimitive("search:$it")) }
+    }
+
+    private fun librarySearchCommand(term: String, offset: Int, limit: Int) = buildJsonArray {
+        add(JsonPrimitive("search"))
+        add(JsonPrimitive(offset))
+        add(JsonPrimitive(limit))
+        add(JsonPrimitive("term:$term"))
+        add(JsonPrimitive("extended:1"))
+    }
+
+    private fun playlistControlCommand(action: String, filterName: String, id: String) = buildJsonArray {
+        add(JsonPrimitive("playlistcontrol"))
+        add(JsonPrimitive("cmd:$action"))
+        add(JsonPrimitive("$filterName:$id"))
+    }
+
+    private fun validateLibraryPage(offset: Int, limit: Int) {
+        require(offset >= 0) { "Library result offset cannot be negative." }
+        require(limit in 1..MAX_LIBRARY_PAGE_SIZE) {
+            "Library page size must be between 1 and $MAX_LIBRARY_PAGE_SIZE."
+        }
+    }
+
     private fun LmsPlayerCommand.toJsonArray() = buildJsonArray {
         toCliTokens().forEach { add(JsonPrimitive(it)) }
     }
@@ -276,8 +404,96 @@ class LmsJsonRpcClient(
     private fun JsonObject.firstBoolean(vararg keys: String): Boolean? =
         keys.firstNotNullOfOrNull { key -> this[key].asBoolean() }
 
+    private fun JsonObject.libraryItems(
+        loopName: String,
+        idField: String,
+        titleField: String,
+        itemType: LmsLibraryItemType,
+        totalCount: Int,
+        detectContainers: Boolean = false
+    ): List<LmsLibraryItem> = libraryLoop(loopName, totalCount).map { entry ->
+        val id = entry[idField].asText()
+            ?: throw LmsProtocolException("LMS library item did not include an ID.")
+        val title = entry[titleField].asText()
+            ?: entry["title"].asText()
+            ?: throw LmsProtocolException("LMS library item did not include a title.")
+        entry.toLibraryItem(
+            id = id,
+            type = itemType,
+            title = title,
+            detectContainer = detectContainers
+        )
+    }
+
+    private fun JsonObject.searchPage(
+        loopName: String,
+        countField: String,
+        idField: String,
+        titleField: String,
+        itemType: LmsLibraryItemType,
+        offset: Int,
+        artworkIdFields: Array<String> = emptyArray()
+    ): LmsLibraryPage {
+        val totalCount = this[countField].asInt() ?: 0
+        val items = libraryLoop(loopName, totalCount).map { entry ->
+            val id = entry[idField].asText()
+                ?: throw LmsProtocolException("LMS search result did not include an ID.")
+            val title = entry[titleField].asText()
+                ?: throw LmsProtocolException("LMS search result did not include a title.")
+            entry.toLibraryItem(id, itemType, title, artworkIdFields = artworkIdFields)
+        }
+        return LmsLibraryPage(items, offset, totalCount)
+    }
+
+    private fun JsonObject.libraryLoop(loopName: String, totalCount: Int): List<JsonObject> {
+        val entries = this[loopName] as? JsonArray
+            ?: if (totalCount == 0) return emptyList()
+            else throw LmsProtocolException("LMS response did not include $loopName.")
+        return entries.map { item ->
+            item as? JsonObject
+                ?: throw LmsProtocolException("LMS returned an invalid library entry.")
+        }
+    }
+
+    private fun JsonObject.toLibraryItem(
+        id: String,
+        type: LmsLibraryItemType,
+        title: String,
+        detectContainer: Boolean = false,
+        artworkIdFields: Array<String> = arrayOf("artwork_track_id", "coverid", "artwork")
+    ) = LmsLibraryItem(
+        id = id,
+        type = type,
+        title = title,
+        artist = this["artist"].asText(),
+        album = this["album"].asText().takeUnless { type == LmsLibraryItemType.ALBUM },
+        durationSeconds = this["duration"].asDouble() ?: this["secs"].asDouble(),
+        artworkId = artworkIdFields.firstNotNullOfOrNull { key ->
+            this[key].asText()?.takeUnless { it.startsWith("http://") || it.startsWith("https://") }
+        },
+        artworkUrl = (listOf("artwork_url") + artworkIdFields.asList()).firstNotNullOfOrNull { key ->
+            this[key].asText()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        },
+        isContainer = detectContainer && (
+            this["type"].asText() == "folder" ||
+                id.startsWith("file:", ignoreCase = true) || '/' in id || '\\' in id
+            )
+    )
+
+    private fun LmsLibraryFilter.toQueryParameters(): List<String> = buildList {
+        artistId?.takeIf(String::isNotBlank)?.let { add("artist_id:$it") }
+        albumId?.takeIf(String::isNotBlank)?.let { add("album_id:$it") }
+        genreId?.takeIf(String::isNotBlank)?.let { add("genre_id:$it") }
+        playlistId?.takeIf(String::isNotBlank)?.let { add("playlist_id:$it") }
+        folderId?.takeIf(String::isNotBlank)?.let { add("folder_id:$it") }
+    }
+
     private fun JsonElement?.asText(): String? =
         (this as? JsonPrimitive)?.contentOrNull
+
+    private companion object {
+        const val MAX_LIBRARY_PAGE_SIZE = 100
+    }
 
     private fun JsonElement.asMessage(): String =
         (this as? JsonPrimitive)?.contentOrNull ?: toString()
