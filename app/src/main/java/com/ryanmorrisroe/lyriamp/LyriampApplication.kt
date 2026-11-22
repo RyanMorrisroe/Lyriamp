@@ -10,6 +10,9 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerRemoteGateway
 import com.ryanmorrisroe.lyriamp.data.persistence.AndroidKeystoreCredentialCipher
 import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreSavedServerRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreLastSessionRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreDisplayPreferencesRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferencesRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.displayPreferencesDataStore
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.SavedServerRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.savedServerDataStore
@@ -27,6 +30,9 @@ class LyriampApplication : Application() {
     }
     val lastSessionRepository: LastSessionRepository by lazy {
         DataStoreLastSessionRepository(applicationContext.savedServerDataStore)
+    }
+    val displayPreferencesRepository: DisplayPreferencesRepository by lazy {
+        DataStoreDisplayPreferencesRepository(applicationContext.displayPreferencesDataStore)
     }
 
     lateinit var connectionGateway: LmsConnectionGateway

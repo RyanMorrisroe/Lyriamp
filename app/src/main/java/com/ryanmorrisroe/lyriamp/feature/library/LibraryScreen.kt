@@ -1,36 +1,54 @@
 package com.ryanmorrisroe.lyriamp.feature.library
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -38,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,12 +64,21 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
@@ -65,6 +93,7 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayer
 import com.ryanmorrisroe.lyriamp.data.lms.basicAuthorizationHeader
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItem
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
@@ -72,7 +101,10 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
+import com.ryanmorrisroe.lyriamp.data.persistence.LibraryLayout
+import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
+import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
 import io.ktor.http.HttpHeaders
 import java.net.URI
 import kotlinx.coroutines.delay
@@ -87,31 +119,79 @@ import kotlinx.coroutines.flow.filterNotNull
 fun LibraryScreen(
     viewModel: LibraryViewModel,
     connectionViewModel: ConnectionViewModel,
+    displayPreferencesViewModel: DisplayPreferencesViewModel,
     mediaPlayer: Player?,
     onChangePlayer: () -> Unit,
-    onChangeServer: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenNowPlaying: () -> Unit,
+    sessionError: String? = null,
+    onRetrySessionSave: () -> Unit = {},
     onLibraryStateChanged: (List<LibraryLocation>, String, LastSessionScrollAnchor?) -> Unit = { _, _, _ -> }
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val connectionState by connectionViewModel.uiState.collectAsStateWithLifecycle()
+    val displayState by displayPreferencesViewModel.state.collectAsStateWithLifecycle()
+    var searchVisible by remember { mutableStateOf(false) }
+    var actionsExpanded by remember { mutableStateOf(false) }
     val items = viewModel.items.collectAsLazyPagingItems()
+    val viewType = if (state.searchText.isNotBlank()) LibraryViewType.SEARCH else when (state.location.query) {
+        LmsLibraryQuery.ARTISTS -> LibraryViewType.ARTISTS
+        LmsLibraryQuery.ALBUMS -> LibraryViewType.ALBUMS
+        LmsLibraryQuery.GENRES -> LibraryViewType.GENRES
+        LmsLibraryQuery.TRACKS, LmsLibraryQuery.PLAYLIST_TRACKS -> LibraryViewType.SONGS
+        LmsLibraryQuery.PLAYLISTS -> LibraryViewType.PLAYLISTS
+        null -> null
+    }
+    val layout = viewType?.let(displayState.preferences::layoutFor) ?: LibraryLayout.COMFORTABLE
     val restoredAnchor = state.scrollAnchor?.takeIf {
         it.locationKey == libraryLocationKey(state.locationStack) &&
             it.searchText == state.searchText
     }
-    val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = restoredAnchor?.index ?: 0,
-        initialFirstVisibleItemScrollOffset = restoredAnchor?.offsetPx ?: 0
-    )
+    val listState = key(state.locationStack, state.searchText) {
+        rememberLazyGridState(
+            initialFirstVisibleItemIndex = restoredAnchor?.index ?: 0,
+            initialFirstVisibleItemScrollOffset = restoredAnchor?.offsetPx ?: 0
+        )
+    }
     var isRestoringScroll by remember(state.locationStack, state.searchText) {
         mutableStateOf(restoredAnchor != null)
+    }
+    var needsPositioning by remember(state.locationStack, state.searchText) {
+        mutableStateOf(true)
     }
     var hasObservedRefresh by remember(state.locationStack, state.searchText) {
         mutableStateOf(false)
     }
     val persistState by rememberUpdatedState(onLibraryStateChanged)
 
+    fun rememberVisiblePosition() {
+        if (!isRestoringScroll && state.searchText.isBlank() && !state.isAtRoot) {
+            val index = listState.firstVisibleItemIndex
+            viewModel.updateScrollAnchor(
+                LastSessionScrollAnchor(
+                    libraryLocationKey(state.locationStack),
+                    state.searchText,
+                    if (index in 0 until items.itemCount) items.peek(index)?.id else null,
+                    index,
+                    listState.firstVisibleItemScrollOffset
+                )
+            )
+        }
+    }
+
+    fun switchTab(tab: LibraryTab) {
+        rememberVisiblePosition()
+        viewModel.selectTab(tab)
+    }
+
+    LaunchedEffect(connectionState.activeConnection, connectionState.selectedPlayerId) {
+        if (connectionState.activeConnection != null && connectionState.selectedPlayerId != null) {
+            while (true) {
+                connectionViewModel.refreshPlayerStatus()
+                delay(1_000)
+            }
+        }
+    }
     LaunchedEffect(state.playbackRevision) {
         if (state.playbackRevision > 0) {
             connectionViewModel.refreshSelectedPlayer()
@@ -122,23 +202,24 @@ fun LibraryScreen(
         if (state.searchText.isNotBlank()) viewModel.setSearchText("")
         else viewModel.navigateBack()
     }
-    LaunchedEffect(items.loadState.refresh) {
+    LaunchedEffect(state.locationStack, state.searchText, items.loadState.refresh) {
         if (items.loadState.refresh is LoadState.Loading) hasObservedRefresh = true
     }
     LaunchedEffect(state.locationStack, state.searchText, items.loadState.refresh, items.itemCount) {
-        if (restoredAnchor == null) {
+        if (needsPositioning && restoredAnchor == null) {
             if (listState.firstVisibleItemIndex != 0) listState.scrollToItem(0)
+            needsPositioning = false
         } else if (isRestoringScroll && state.isAtRoot && state.searchText.isBlank()) {
-            val index = restoredAnchor.index.coerceIn(0, libraryCategories.lastIndex)
-            listState.scrollToItem(index, restoredAnchor.offsetPx)
             isRestoringScroll = false
+            needsPositioning = false
         } else if (
-            isRestoringScroll &&
-            (items.itemCount > 0 || hasObservedRefresh && items.loadState.refresh is LoadState.NotLoading)
+            restoredAnchor != null && isRestoringScroll && hasObservedRefresh &&
+            items.loadState.refresh is LoadState.NotLoading
         ) {
             val index = restoredAnchor.index.coerceAtMost((items.itemCount - 1).coerceAtLeast(0))
             if (items.itemCount > 0) listState.scrollToItem(index, restoredAnchor.offsetPx)
             isRestoringScroll = false
+            needsPositioning = false
         }
     }
     LaunchedEffect(state.locationStack, state.searchText, items, listState) {
@@ -147,9 +228,7 @@ fun LibraryScreen(
                 null
             } else {
                 val index = listState.firstVisibleItemIndex
-                val itemId = if (state.isAtRoot && state.searchText.isBlank()) {
-                    libraryCategories.getOrNull(index)?.query?.name
-                } else if (index in 0 until items.itemCount) {
+                val itemId = if (index in 0 until items.itemCount && (!state.isAtRoot || state.searchText.isNotBlank())) {
                     items.peek(index)?.id
                 } else {
                     null
@@ -166,6 +245,7 @@ fun LibraryScreen(
             .filterNotNull()
             .debounce(350)
             .collect { anchor ->
+                viewModel.updateScrollAnchor(anchor)
                 persistState(state.locationStack, state.searchText, anchor)
             }
     }
@@ -178,12 +258,71 @@ fun LibraryScreen(
                 },
                 navigationIcon = {
                     if (!state.isAtRoot && state.searchText.isBlank()) {
-                        TextButton(onClick = viewModel::navigateBack) { Text("Back") }
+                        IconButton(
+                            onClick = viewModel::navigateBack,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Back"
+                            }
+                        ) {
+                            LibraryGlyphIcon(
+                                LibraryGlyph.BACK,
+                                MaterialTheme.colorScheme.onSurface,
+                                Modifier.size(24.dp)
+                            )
+                        }
                     }
                 },
                 actions = {
-                    TextButton(onClick = onChangePlayer) { Text("Players") }
-                    TextButton(onClick = onChangeServer) { Text("Servers") }
+                    if (state.selectedTab != LibraryTab.HOME) {
+                        IconButton(
+                            onClick = {
+                                if (searchVisible) viewModel.setSearchText("")
+                                searchVisible = !searchVisible
+                            },
+                            modifier = Modifier.semantics {
+                                contentDescription = if (searchVisible) "Close search" else "Search"
+                            }
+                        ) {
+                            LibraryGlyphIcon(
+                                if (searchVisible) LibraryGlyph.CLOSE else LibraryGlyph.SEARCH,
+                                MaterialTheme.colorScheme.onSurface,
+                                Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                    Box {
+                        IconButton(
+                            onClick = { actionsExpanded = true },
+                            modifier = Modifier.semantics {
+                                contentDescription = "More actions"
+                            }
+                        ) {
+                            LibraryGlyphIcon(
+                                LibraryGlyph.MORE,
+                                MaterialTheme.colorScheme.onSurface,
+                                Modifier.size(24.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = actionsExpanded,
+                            onDismissRequest = { actionsExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Players") },
+                                onClick = {
+                                    actionsExpanded = false
+                                    onChangePlayer()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Settings") },
+                                onClick = {
+                                    actionsExpanded = false
+                                    onOpenSettings()
+                                }
+                            )
+                        }
+                    }
                 }
             )
         },
@@ -205,21 +344,67 @@ fun LibraryScreen(
                 .fillMaxSize()
                 .padding(contentPadding)
         ) {
-            OutlinedTextField(
-                value = state.searchText,
-                onValueChange = viewModel::setSearchText,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                label = { Text("Search artists, albums, and tracks") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                trailingIcon = {
-                    if (state.searchText.isNotEmpty()) {
-                        TextButton(onClick = { viewModel.setSearchText("") }) { Text("Clear") }
-                    }
+            ScrollableTabRow(
+                selectedTabIndex = LibraryTab.entries.indexOf(state.selectedTab),
+                modifier = Modifier.fillMaxWidth().testTag("library-tabs"),
+                edgePadding = 16.dp,
+                divider = {}
+            ) {
+                LibraryTab.entries.forEach { tab ->
+                    Tab(
+                        selected = state.selectedTab == tab,
+                        onClick = { switchTab(tab) },
+                        text = { Text(tab.title, maxLines = 1) }
+                    )
                 }
-            )
+            }
+            if (
+                state.selectedTab == LibraryTab.HOME && state.searchText.isBlank() ||
+                searchVisible || state.searchText.isNotBlank()
+            ) {
+                OutlinedTextField(
+                    value = state.searchText,
+                    onValueChange = {
+                        if (state.searchText.isBlank() && it.isNotBlank()) rememberVisiblePosition()
+                        viewModel.setSearchText(it)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    placeholder = {
+                        Text(
+                            "Search artists, albums, and tracks",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    leadingIcon = {
+                        LibraryGlyphIcon(
+                            LibraryGlyph.SEARCH,
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                            Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (state.searchText.isNotEmpty()) {
+                            IconButton(
+                                onClick = { viewModel.setSearchText("") },
+                                modifier = Modifier.semantics {
+                                    contentDescription = "Clear search"
+                                }
+                            ) {
+                                LibraryGlyphIcon(
+                                    LibraryGlyph.CLOSE,
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                    Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                )
+            }
             if (!state.isAtRoot && state.searchText.isBlank() && state.locationStack.size > 2) {
                 Row(
                     modifier = Modifier
@@ -250,25 +435,94 @@ fun LibraryScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+            displayState.error?.let {
+                Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = displayPreferencesViewModel::retry) { Text("Retry reading settings") }
+            }
+            sessionError?.let {
+                Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = onRetrySessionSave) { Text("Retry saving position") }
+            }
             if (state.isAtRoot && state.searchText.isBlank()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    state = listState
-                ) {
-                    items(libraryCategories, key = { it.query.name }) { category ->
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    Column(
+                        modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "Your collection",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Text("What sounds good?", style = MaterialTheme.typography.headlineSmall)
+                        Text(
+                            "Browse your music, your way.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    libraryCategories.chunked(2).forEach { categories ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            categories.forEach { category ->
+                                Surface(
+                                    onClick = {
+                                        switchTab(LibraryTab.entries.first { it.query == category.query })
+                                    },
+                                    modifier = Modifier.weight(1f).height(92.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                                ) {
+                                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                                        Text(category.title, style = MaterialTheme.typography.titleSmall)
+                                        Text("Browse", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                            if (categories.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                    state.lastVisitedTab?.let { tab ->
                         ListItem(
-                            modifier = Modifier.clickable { viewModel.openCategory(category) },
-                            headlineContent = {
-                                Text(category.title, fontWeight = FontWeight.Medium)
-                            },
-                            trailingContent = { Text("Browse") }
+                            modifier = Modifier.clickable { switchTab(tab) },
+                            headlineContent = { Text("Last visited") },
+                            supportingContent = {
+                                Text(state.tabs[tab]?.locations?.lastOrNull()?.title ?: tab.title)
+                            }
                         )
                     }
                 }
             } else {
+                if (viewType != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (state.searchText.isBlank()) {
+                                "Browse ${state.location.title}"
+                            } else {
+                                "Search results"
+                            },
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1
+                        )
+                        LibraryLayoutSelector(
+                            viewType = viewType,
+                            selectedLayout = layout,
+                            onSelect = { displayPreferencesViewModel.setLayout(viewType, it) }
+                        )
+                    }
+                }
                 LibraryResults(
                     items = items,
                     listState = listState,
+                    layout = layout,
                     activePlayer = state.activePlayer,
                     isPlayingItem = state.isPlayingItem,
                     onOpenItem = viewModel::openItem,
@@ -284,25 +538,27 @@ fun LibraryScreen(
 @Composable
 private fun LibraryResults(
     items: LazyPagingItems<LmsLibraryItem>,
-    listState: androidx.compose.foundation.lazy.LazyListState,
+    listState: androidx.compose.foundation.lazy.grid.LazyGridState,
+    layout: LibraryLayout,
     activePlayer: LmsActivePlayer?,
     isPlayingItem: Boolean,
     onOpenItem: (LmsLibraryItem) -> Unit,
     onPlayNow: (LmsLibraryItem) -> Unit,
     onRetry: () -> Unit
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+    LazyVerticalGrid(
+        columns = if (layout == LibraryLayout.COVER_WALL) GridCells.Adaptive(150.dp) else GridCells.Fixed(1),
+        modifier = Modifier.fillMaxSize().testTag("library-results"),
         state = listState,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 8.dp)
     ) {
         when (val refresh = items.loadState.refresh) {
-            LoadState.Loading -> if (items.itemCount == 0) item { LoadingRow() }
-            is LoadState.Error -> if (items.itemCount == 0) item {
+            LoadState.Loading -> if (items.itemCount == 0) item(span = { GridItemSpan(maxLineSpan) }) { LoadingRow() }
+            is LoadState.Error -> if (items.itemCount == 0) item(span = { GridItemSpan(maxLineSpan) }) {
                 ErrorRow(refresh.error.message ?: "Could not load the library.", onRetry)
             }
             is LoadState.NotLoading -> if (items.itemCount == 0) {
-                item {
+                item(span = { GridItemSpan(maxLineSpan) }) {
                     Text(
                         "No results.",
                         modifier = Modifier.padding(24.dp),
@@ -317,20 +573,31 @@ private fun LibraryResults(
         ) { index ->
             val item = items[index]
             if (item != null) {
-                LibraryItemRow(
-                    item = item,
-                    connection = activePlayer?.connection,
-                    isPlayingItem = isPlayingItem,
-                    onOpen = { onOpenItem(item) },
-                    onPlayNow = { onPlayNow(item) }
-                )
+                if (layout == LibraryLayout.COVER_WALL) {
+                    LibraryItemCard(
+                        item = item,
+                        connection = activePlayer?.connection,
+                        isPlayingItem = isPlayingItem,
+                        onOpen = { onOpenItem(item) },
+                        onPlayNow = { onPlayNow(item) }
+                    )
+                } else {
+                    LibraryItemRow(
+                        item = item,
+                        connection = activePlayer?.connection,
+                        showArtwork = layout == LibraryLayout.COMFORTABLE,
+                        isPlayingItem = isPlayingItem,
+                        onOpen = { onOpenItem(item) },
+                        onPlayNow = { onPlayNow(item) }
+                    )
+                }
             } else {
                 LoadingRow()
             }
         }
         when (val append = items.loadState.append) {
-            LoadState.Loading -> item { LoadingRow() }
-            is LoadState.Error -> item {
+            LoadState.Loading -> item(span = { GridItemSpan(maxLineSpan) }) { LoadingRow() }
+            is LoadState.Error -> item(span = { GridItemSpan(maxLineSpan) }) {
                 ErrorRow(append.error.message ?: "Could not load more results.", onRetry)
             }
             is LoadState.NotLoading -> Unit
@@ -342,19 +609,12 @@ private fun LibraryResults(
 private fun LibraryItemRow(
     item: LmsLibraryItem,
     connection: LmsServerConnection?,
+    showArtwork: Boolean,
     isPlayingItem: Boolean,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit
 ) {
-    val context = LocalContext.current
-    val imageRequest = remember(item, connection) {
-        connection?.artworkRequest(context, item)
-    }
-    val canPlay = !item.isContainer && item.type in setOf(
-        LmsLibraryItemType.ALBUM,
-        LmsLibraryItemType.TRACK,
-        LmsLibraryItemType.PLAYLIST
-    )
+    val canPlay = item.canPlay()
     val subtitle = listOfNotNull(
         item.type.displayName(),
         item.artist,
@@ -366,28 +626,9 @@ private fun LibraryItemRow(
         modifier = Modifier.clickable {
             if (item.type == LmsLibraryItemType.TRACK) onPlayNow() else onOpen()
         },
-        leadingContent = {
-            if (imageRequest != null) {
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = "${item.title} artwork",
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Surface(
-                    modifier = Modifier.size(52.dp),
-                    shape = RoundedCornerShape(4.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
-                        Text("LP", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-            }
-        },
+        leadingContent = if (showArtwork) {
+            { LibraryArtwork(item, connection, Modifier.size(52.dp)) }
+        } else null,
         headlineContent = { Text(item.title, maxLines = 1) },
         supportingContent = {
             Text(subtitle, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -403,6 +644,230 @@ private fun LibraryItemRow(
 }
 
 @Composable
+private fun LibraryItemCard(
+    item: LmsLibraryItem,
+    connection: LmsServerConnection?,
+    isPlayingItem: Boolean,
+    onOpen: () -> Unit,
+    onPlayNow: () -> Unit
+) {
+    Column(Modifier.padding(8.dp).clickable(onClick = onOpen)) {
+        LibraryArtwork(
+            item,
+            connection,
+            Modifier.fillMaxWidth().aspectRatio(1f)
+        )
+        Text(item.title, maxLines = 1, style = MaterialTheme.typography.titleSmall)
+        item.artist?.let { Text(it, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
+        if (item.canPlay()) {
+            TextButton(onClick = onPlayNow, enabled = !isPlayingItem) { Text("Play") }
+        }
+    }
+}
+
+@Composable
+private fun LibraryArtwork(item: LmsLibraryItem, connection: LmsServerConnection?, modifier: Modifier) {
+    val context = LocalContext.current
+    val imageRequest = remember(item, connection) { connection?.artworkRequest(context, item) }
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(4.dp)),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
+            Text(item.type.displayName(), style = MaterialTheme.typography.labelSmall)
+            if (imageRequest != null) {
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = "${item.title} artwork",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
+    }
+}
+
+private fun LmsLibraryItem.canPlay(): Boolean = !isContainer && type in setOf(
+    LmsLibraryItemType.ALBUM, LmsLibraryItemType.TRACK, LmsLibraryItemType.PLAYLIST
+)
+
+private fun LibraryLayout.displayName(): String = when (this) {
+    LibraryLayout.COVER_WALL -> "Cover wall"
+    LibraryLayout.COMPACT -> "Compact"
+    LibraryLayout.COMFORTABLE -> "Comfortable"
+}
+
+@Composable
+private fun LibraryLayoutSelector(
+    viewType: LibraryViewType,
+    selectedLayout: LibraryLayout,
+    onSelect: (LibraryLayout) -> Unit
+) {
+    val layouts = if (viewType.allowsCoverWall) {
+        LibraryLayout.entries
+    } else {
+        listOf(LibraryLayout.COMPACT, LibraryLayout.COMFORTABLE)
+    }
+    val shape = RoundedCornerShape(12.dp)
+
+    Surface(
+        modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Row(Modifier.padding(3.dp)) {
+            layouts.forEach { option ->
+                val selected = selectedLayout == option
+                val segmentShape = RoundedCornerShape(9.dp)
+                IconToggleButton(
+                    checked = selected,
+                    onCheckedChange = { if (it) onSelect(option) },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(segmentShape)
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.secondaryContainer
+                            else Color.Transparent
+                        )
+                        .semantics {
+                            contentDescription = option.displayName()
+                        }
+                ) {
+                    LibraryGlyphIcon(
+                        glyph = when (option) {
+                            LibraryLayout.COVER_WALL -> LibraryGlyph.COVER_WALL
+                            LibraryLayout.COMPACT -> LibraryGlyph.COMPACT
+                            LibraryLayout.COMFORTABLE -> LibraryGlyph.COMFORTABLE
+                        },
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class LibraryGlyph {
+    BACK,
+    CLOSE,
+    COMPACT,
+    COMFORTABLE,
+    COVER_WALL,
+    MORE,
+    NEXT,
+    PAUSE,
+    PLAY,
+    PREVIOUS,
+    SEARCH,
+    MUSIC
+}
+
+@Composable
+private fun LibraryGlyphIcon(
+    glyph: LibraryGlyph,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier) {
+        val unit = size.minDimension / 24f
+
+        fun rect(left: Float, top: Float, width: Float, height: Float) {
+            drawRect(
+                color = color,
+                topLeft = Offset(left * unit, top * unit),
+                size = Size(width * unit, height * unit)
+            )
+        }
+
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = color,
+                start = Offset(x1 * unit, y1 * unit),
+                end = Offset(x2 * unit, y2 * unit),
+                strokeWidth = 2f * unit,
+                cap = StrokeCap.Round
+            )
+        }
+
+        fun triangle(first: Offset, second: Offset, third: Offset) {
+            val path = Path().apply {
+                moveTo(first.x * unit, first.y * unit)
+                lineTo(second.x * unit, second.y * unit)
+                lineTo(third.x * unit, third.y * unit)
+                close()
+            }
+            drawPath(path, color)
+        }
+
+        when (glyph) {
+            LibraryGlyph.BACK -> {
+                line(19f, 12f, 5f, 12f)
+                line(5f, 12f, 11f, 6f)
+                line(5f, 12f, 11f, 18f)
+            }
+            LibraryGlyph.CLOSE -> {
+                line(6f, 6f, 18f, 18f)
+                line(18f, 6f, 6f, 18f)
+            }
+            LibraryGlyph.COMPACT -> for (row in 0..3) {
+                val top = 2f + row * 5f
+                rect(2f, top, 3f, 3f)
+                rect(8f, top + 0.5f, 14f, 2f)
+            }
+            LibraryGlyph.COMFORTABLE -> for (row in 0..2) {
+                val top = 2f + row * 7f
+                rect(2f, top, 3f, 3f)
+                rect(8f, top + 0.5f, 14f, 2f)
+            }
+            LibraryGlyph.COVER_WALL -> {
+                for (row in 0..1) {
+                    for (column in 0..1) {
+                        rect(2f + column * 11f, 2f + row * 11f, 9f, 9f)
+                    }
+                }
+            }
+            LibraryGlyph.MORE -> for (x in listOf(5f, 12f, 19f)) {
+                drawCircle(color, 1.8f * unit, Offset(x * unit, 12f * unit))
+            }
+            LibraryGlyph.NEXT -> {
+                triangle(Offset(5f, 5f), Offset(15f, 12f), Offset(5f, 19f))
+                rect(18f, 5f, 2f, 14f)
+            }
+            LibraryGlyph.PAUSE -> {
+                rect(6f, 5f, 4f, 14f)
+                rect(14f, 5f, 4f, 14f)
+            }
+            LibraryGlyph.PLAY -> triangle(Offset(7f, 5f), Offset(19f, 12f), Offset(7f, 19f))
+            LibraryGlyph.PREVIOUS -> {
+                rect(4f, 5f, 2f, 14f)
+                triangle(Offset(19f, 5f), Offset(9f, 12f), Offset(19f, 19f))
+            }
+            LibraryGlyph.SEARCH -> {
+                drawCircle(
+                    color = color,
+                    radius = 7f * unit,
+                    center = Offset(10f * unit, 10f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
+                line(15f, 15f, 21f, 21f)
+            }
+            LibraryGlyph.MUSIC -> {
+                line(14f, 4f, 14f, 18f)
+                line(14f, 4f, 21f, 3f)
+                drawCircle(color, 3.5f * unit, Offset(10f * unit, 18f * unit))
+                drawCircle(color, 3.5f * unit, Offset(17f * unit, 16f * unit))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun PlayerStrip(
     modifier: Modifier = Modifier,
     activePlayer: LmsActivePlayer?,
@@ -413,9 +878,23 @@ private fun PlayerStrip(
     onExpand: () -> Unit,
     onChangePlayer: () -> Unit
 ) {
+    val cardShape = RoundedCornerShape(18.dp)
+    val cardModifier = modifier
+        .fillMaxWidth()
+        .padding(horizontal = 12.dp, vertical = 8.dp)
+
     if (activePlayer == null) {
-        Surface(modifier = modifier, tonalElevation = 2.dp) {
-            TextButton(onClick = onChangePlayer, modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            modifier = cardModifier,
+            shape = cardShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 4.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            TextButton(
+                onClick = onChangePlayer,
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) {
                 Text("Select a player")
             }
         }
@@ -423,31 +902,68 @@ private fun PlayerStrip(
     }
     val controlsEnabled = !isSendingCommand
     val playback = rememberPlayerStripState(mediaPlayer, status, activePlayer.playerName)
-    Surface(modifier = modifier, tonalElevation = 3.dp) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    Surface(
+        modifier = cardModifier,
+        shape = cardShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 4.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 10.dp, top = 8.dp, end = 8.dp, bottom = 2.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PlayerArtwork(mediaPlayer, Modifier.size(48.dp))
+                Spacer(Modifier.width(10.dp))
                 Column(
-                    modifier = Modifier.weight(1f).clickable(onClick = onExpand),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onExpand)
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
-                    Text(activePlayer.playerName, style = MaterialTheme.typography.labelSmall)
                     Text(
-                        playback.title,
-                        style = MaterialTheme.typography.titleSmall,
+                        activePlayer.playerName,
+                        style = MaterialTheme.typography.labelSmall,
                         maxLines = 1
                     )
-                    playback.artist?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    Text(
+                        playback.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1
+                    )
+                    playback.artist?.takeIf(String::isNotBlank)?.let { artist ->
+                        Text(
+                            artist,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
-                TextButton(
+                IconButton(
                     onClick = {
                         if (mediaPlayer == null) onCommand(LmsPlayerCommand.Previous)
                         else mediaPlayer.seekToPreviousMediaItem()
                     },
-                    enabled = controlsEnabled
-                ) { Text("Prev") }
-                TextButton(
+                    enabled = controlsEnabled,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .semantics { contentDescription = "Previous track" }
+                ) {
+                    LibraryGlyphIcon(
+                        LibraryGlyph.PREVIOUS,
+                        MaterialTheme.colorScheme.onSurface,
+                        Modifier.size(20.dp)
+                    )
+                }
+                FilledIconButton(
                     onClick = {
                         if (mediaPlayer == null) {
                             onCommand(
@@ -456,25 +972,61 @@ private fun PlayerStrip(
                             )
                         } else if (playback.isPlaying) mediaPlayer.pause() else mediaPlayer.play()
                     },
-                    enabled = controlsEnabled
-                ) { Text(if (playback.isPlaying) "Pause" else "Play") }
-                TextButton(
+                    enabled = controlsEnabled,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .semantics {
+                            contentDescription = if (playback.isPlaying) {
+                                "Pause playback"
+                            } else {
+                                "Play playback"
+                            }
+                        },
+                    shape = CircleShape
+                ) {
+                    LibraryGlyphIcon(
+                        if (playback.isPlaying) LibraryGlyph.PAUSE else LibraryGlyph.PLAY,
+                        MaterialTheme.colorScheme.onPrimary,
+                        Modifier.size(20.dp)
+                    )
+                }
+                IconButton(
                     onClick = {
                         if (mediaPlayer == null) onCommand(LmsPlayerCommand.Next)
                         else mediaPlayer.seekToNextMediaItem()
                     },
-                    enabled = controlsEnabled
-                ) { Text("Next") }
+                    enabled = controlsEnabled,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .semantics { contentDescription = "Next track" }
+                ) {
+                    LibraryGlyphIcon(
+                        LibraryGlyph.NEXT,
+                        MaterialTheme.colorScheme.onSurface,
+                        Modifier.size(20.dp)
+                    )
+                }
             }
             if (playback.canSeek && playback.durationMs != null) {
                 var position by remember(playback.durationMs) {
                     mutableFloatStateOf(playback.positionMs / 1_000f)
                 }
                 var isSeeking by remember(playback.durationMs) { mutableStateOf(false) }
+                val seekColors = SliderDefaults.colors(
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+                val seekInteractionSource = remember(playback.durationMs) {
+                    MutableInteractionSource()
+                }
                 LaunchedEffect(playback.positionMs, playback.durationMs) {
                     if (!isSeeking) position = playback.positionMs / 1_000f
                 }
                 Slider(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .semantics { contentDescription = "Playback position" }
+                        .testTag("player-strip-progress"),
                     value = position.coerceIn(0f, playback.durationMs / 1_000f),
                     onValueChange = {
                         isSeeking = true
@@ -486,7 +1038,42 @@ private fun PlayerStrip(
                         isSeeking = false
                     },
                     valueRange = 0f..(playback.durationMs / 1_000f),
-                    enabled = controlsEnabled
+                    enabled = controlsEnabled,
+                    colors = seekColors,
+                    interactionSource = seekInteractionSource,
+                    thumb = {
+                        SliderDefaults.Thumb(
+                            interactionSource = seekInteractionSource,
+                            colors = seekColors,
+                            enabled = controlsEnabled,
+                            thumbSize = DpSize(12.dp, 12.dp)
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerArtwork(player: Player?, modifier: Modifier) {
+    val artworkUri = player?.currentMediaItem?.mediaMetadata?.artworkUri
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(10.dp)),
+        color = MaterialTheme.colorScheme.primaryContainer
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            LibraryGlyphIcon(
+                LibraryGlyph.MUSIC,
+                MaterialTheme.colorScheme.onPrimaryContainer,
+                Modifier.size(24.dp)
+            )
+            artworkUri?.let {
+                AsyncImage(
+                    model = it,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
             }
         }
@@ -544,7 +1131,9 @@ private fun Player?.readPlayerStripState(
             ?: if (hasCurrentItem) playerName else "Nothing playing",
         artist = metadata?.artist?.toString()?.takeIf(String::isNotBlank) ?: status?.artist,
         isPlaying = this?.isPlaying == true || (!hasCurrentItem && status?.mode == LmsPlaybackMode.PLAYING),
-        positionMs = this?.currentPosition ?: ((status?.positionSeconds ?: 0.0) * 1_000).toLong(),
+        positionMs = status?.positionSeconds?.times(1_000)?.toLong()
+            ?: this?.currentPosition
+            ?: 0L,
         durationMs = mediaDuration ?: status?.durationSeconds?.let { (it * 1_000).toLong() },
         canSeek = if (hasCurrentItem) {
             isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)

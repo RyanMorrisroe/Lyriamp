@@ -19,6 +19,8 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryPage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySearchResults
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
+import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionTabSnapshot
+import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionLocation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -46,6 +48,20 @@ data class LibraryCategory(
     val query: LmsLibraryQuery
 )
 
+enum class LibraryTab(val title: String, val query: LmsLibraryQuery?) {
+    HOME("Home", null),
+    ARTISTS("Artists", LmsLibraryQuery.ARTISTS),
+    ALBUMS("Albums", LmsLibraryQuery.ALBUMS),
+    GENRES("Genres", LmsLibraryQuery.GENRES),
+    SONGS("Songs", LmsLibraryQuery.TRACKS),
+    PLAYLISTS("Playlists", LmsLibraryQuery.PLAYLISTS)
+}
+
+data class LibraryTabState(
+    val locations: List<LibraryLocation>,
+    val anchor: LastSessionScrollAnchor? = null
+)
+
 data class LibraryUiState(
     val locationStack: List<LibraryLocation> = listOf(LibraryLocation("Library")),
     val searchText: String = "",
@@ -53,7 +69,10 @@ data class LibraryUiState(
     val isPlayingItem: Boolean = false,
     val message: String? = null,
     val playbackRevision: Int = 0,
-    val scrollAnchor: LastSessionScrollAnchor? = null
+    val scrollAnchor: LastSessionScrollAnchor? = null,
+    val selectedTab: LibraryTab = LibraryTab.HOME,
+    val lastVisitedTab: LibraryTab? = null,
+    val tabs: Map<LibraryTab, LibraryTabState> = emptyMap()
 ) {
     val location: LibraryLocation
         get() = locationStack.last()
@@ -66,6 +85,7 @@ val libraryCategories = listOf(
     LibraryCategory("Artists", LmsLibraryQuery.ARTISTS),
     LibraryCategory("Albums", LmsLibraryQuery.ALBUMS),
     LibraryCategory("Genres", LmsLibraryQuery.GENRES),
+    LibraryCategory("Songs", LmsLibraryQuery.TRACKS),
     LibraryCategory("Playlists", LmsLibraryQuery.PLAYLISTS)
 )
 
@@ -80,6 +100,12 @@ class LibraryViewModel(
     private val mutableMessage = MutableStateFlow<String?>(null)
     private val mutablePlaybackRevision = MutableStateFlow(0)
     private val mutableRestoredScrollAnchor = MutableStateFlow<LastSessionScrollAnchor?>(null)
+    private val mutableSelectedTab = MutableStateFlow(LibraryTab.HOME)
+    private val mutableLastVisitedTab = MutableStateFlow<LibraryTab?>(null)
+    private val mutableTabs = MutableStateFlow<Map<LibraryTab, LibraryTabState>>(emptyMap())
+    private val tabState = combine(mutableSelectedTab, mutableLastVisitedTab, mutableTabs) { selected, last, tabs ->
+        Triple(selected, last, tabs)
+    }
     private val debouncedSearch = mutableSearchText
         .map(String::trim)
         .debounce(SEARCH_DEBOUNCE_MILLIS)
@@ -99,7 +125,7 @@ class LibraryViewModel(
         Triple(isPlayingItem, message, playbackRevision)
     }
 
-    val uiState = combine(locationState, playbackState, mutableRestoredScrollAnchor) { location, playback, anchor ->
+    val uiState = combine(locationState, playbackState, mutableRestoredScrollAnchor, tabState) { location, playback, anchor, tabs ->
         LibraryUiState(
             locationStack = location.first,
             searchText = location.second,
@@ -107,7 +133,10 @@ class LibraryViewModel(
             isPlayingItem = playback.first,
             message = playback.second,
             playbackRevision = playback.third,
-            scrollAnchor = anchor
+            scrollAnchor = anchor,
+            selectedTab = tabs.first,
+            lastVisitedTab = tabs.second,
+            tabs = tabs.third
         )
     }.stateIn(
         viewModelScope,
@@ -154,13 +183,22 @@ class LibraryViewModel(
     }.cachedIn(viewModelScope)
 
     fun setSearchText(value: String) {
+        if (value.isBlank() && mutableSearchText.value.isNotBlank()) {
+            mutableRestoredScrollAnchor.value = mutableTabs.value[mutableSelectedTab.value]?.anchor
+                ?.takeIf { it.searchText.isBlank() && it.locationKey == libraryLocationKey(mutableLocationStack.value) }
+        } else if (value.isNotBlank() && mutableSearchText.value.isBlank()) {
+            mutableRestoredScrollAnchor.value = null
+        }
         mutableSearchText.value = value
     }
 
     fun restoreSession(
         locationStack: List<LibraryLocation>,
         searchText: String,
-        scrollAnchor: LastSessionScrollAnchor?
+        scrollAnchor: LastSessionScrollAnchor?,
+        activeTab: String? = null,
+        lastVisitedTab: String? = null,
+        tabs: Map<String, LastSessionTabSnapshot> = emptyMap()
     ) {
         mutableLocationStack.value = if (locationStack.firstOrNull()?.title == "Library") {
             locationStack
@@ -169,20 +207,94 @@ class LibraryViewModel(
         }
         mutableSearchText.value = searchText
         mutableRestoredScrollAnchor.value = scrollAnchor
+        val restoredTabs = tabs.mapNotNull { (name, snapshot) ->
+            val tab = LibraryTab.entries.find { it.name == name && it != LibraryTab.HOME }
+                ?: return@mapNotNull null
+            val locations = snapshot.locationStack.map { LibraryLocation(it.title, it.query, it.filter) }
+            if (locations.getOrNull(1)?.query != tab.query) return@mapNotNull null
+            tab to LibraryTabState(locations, snapshot.scrollAnchor)
+        }.toMap()
+        val selected = LibraryTab.entries.find { it.name == activeTab }
+            ?: LibraryTab.entries.find { it.query != null && it.query == mutableLocationStack.value.getOrNull(1)?.query }
+            ?: LibraryTab.HOME
+        mutableSelectedTab.value = selected
+        mutableLastVisitedTab.value = LibraryTab.entries.find { it.name == lastVisitedTab && it != LibraryTab.HOME }
+            ?: selected.takeUnless { it == LibraryTab.HOME }
+        mutableTabs.value = if (selected == LibraryTab.HOME || searchText.isNotBlank() && selected in restoredTabs) restoredTabs else {
+            restoredTabs + (selected to LibraryTabState(mutableLocationStack.value, scrollAnchor))
+        }
     }
 
     fun resetToRoot() {
         mutableLocationStack.value = listOf(LibraryLocation("Library"))
         mutableSearchText.value = ""
         mutableRestoredScrollAnchor.value = null
+        mutableSelectedTab.value = LibraryTab.HOME
+        mutableLastVisitedTab.value = null
+        mutableTabs.value = emptyMap()
     }
 
     fun openCategory(category: LibraryCategory) {
+        val tab = LibraryTab.entries.first { it.query == category.query }
+        selectTab(tab)
+    }
+
+    fun selectTab(tab: LibraryTab) {
+        if (tab == mutableSelectedTab.value && mutableSearchText.value.isBlank()) return
+        rememberCurrentTab()
         mutableSearchText.value = ""
-        mutableLocationStack.update {
-            it + LibraryLocation(category.title, category.query)
+        mutableSelectedTab.value = tab
+        if (tab == LibraryTab.HOME) {
+            mutableLocationStack.value = listOf(LibraryLocation("Library"))
+            mutableRestoredScrollAnchor.value = null
+        } else {
+            val saved = mutableTabs.value[tab] ?: LibraryTabState(
+                listOf(LibraryLocation("Library"), LibraryLocation(tab.title, tab.query))
+            )
+            mutableLocationStack.value = saved.locations
+            mutableRestoredScrollAnchor.value = saved.anchor?.takeIf { it.searchText.isBlank() }
+            mutableLastVisitedTab.value = tab
         }
     }
+
+    fun updateScrollAnchor(anchor: LastSessionScrollAnchor) {
+        val tab = mutableSelectedTab.value
+        if (tab != LibraryTab.HOME && anchor.searchText.isBlank() &&
+            anchor.locationKey == libraryLocationKey(mutableLocationStack.value)
+        ) {
+            mutableTabs.update { it + (tab to LibraryTabState(mutableLocationStack.value, anchor)) }
+        }
+    }
+
+    fun isCurrentLocation(locations: List<LibraryLocation>, searchText: String): Boolean =
+        mutableLocationStack.value == locations && mutableSearchText.value == searchText
+
+    fun currentTab(): LibraryTab = mutableSelectedTab.value
+
+    fun lastVisitedTab(): LibraryTab? = mutableLastVisitedTab.value
+
+    private fun rememberCurrentTab() {
+        val tab = mutableSelectedTab.value
+        if (tab != LibraryTab.HOME) {
+            val previous = mutableTabs.value[tab]
+            mutableTabs.update {
+                it + (tab to LibraryTabState(
+                    mutableLocationStack.value,
+                    previous?.anchor?.takeIf { anchor ->
+                        anchor.locationKey == libraryLocationKey(mutableLocationStack.value)
+                    }
+                ))
+            }
+        }
+    }
+
+    fun savedTabs(): Map<String, LastSessionTabSnapshot> =
+        mutableTabs.value.mapKeys { it.key.name }.mapValues { (_, state) ->
+            LastSessionTabSnapshot(
+                state.locations.map { LastSessionLocation(it.title, it.query, it.filter) },
+                state.anchor
+            )
+        }
 
     fun openItem(item: LmsLibraryItem) {
         val nextLocation = when (item.type) {
@@ -219,19 +331,33 @@ class LibraryViewModel(
         if (nextLocation != null) {
             mutableSearchText.value = ""
             mutableLocationStack.update { it + nextLocation }
+            mutableRestoredScrollAnchor.value = null
+            rememberCurrentTab()
         }
     }
 
     fun navigateToBreadcrumb(index: Int) {
+        if (index == 0) {
+            selectTab(LibraryTab.HOME)
+            return
+        }
         mutableLocationStack.update { stack ->
             if (index in stack.indices) stack.take(index + 1) else stack
         }
+        mutableRestoredScrollAnchor.value = null
+        rememberCurrentTab()
     }
 
     fun navigateBack() {
+        if (mutableLocationStack.value.size <= 2 && mutableSelectedTab.value != LibraryTab.HOME) {
+            selectTab(LibraryTab.HOME)
+            return
+        }
         mutableLocationStack.update { stack ->
             if (stack.size > 1) stack.dropLast(1) else stack
         }
+        mutableRestoredScrollAnchor.value = null
+        rememberCurrentTab()
     }
 
     fun clearMessage() {
@@ -290,7 +416,8 @@ class LibraryViewModel(
             initialLoadSize = PAGE_SIZE,
             prefetchDistance = 8,
             enablePlaceholders = true,
-            maxSize = PAGE_SIZE * 4
+            maxSize = PAGE_SIZE * 4,
+            jumpThreshold = PAGE_SIZE * 4
         )
     }
 }
@@ -301,16 +428,24 @@ internal class LmsLibraryPagingSource(
     private val query: LmsLibraryQuery,
     private val filter: LmsLibraryFilter
 ) : PagingSource<Int, LmsLibraryItem>() {
+    override val jumpingSupported: Boolean = true
+
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, LmsLibraryItem> = try {
-        val offset = params.key ?: 0
+        var offset = params.key ?: 0
         val limit = params.loadSize.coerceIn(1, MAX_PAGE_SIZE)
-        val page = gateway.getPage(
+        var page = gateway.getPage(
             activePlayer.connection,
             query,
             offset,
             limit,
             filter
         )
+        if (offset > 0 && offset >= page.totalCount) {
+            offset = (page.totalCount - 1).coerceAtLeast(0)
+            if (page.totalCount > 0) {
+                page = gateway.getPage(activePlayer.connection, query, offset, limit, filter)
+            }
+        }
         LoadResult.Page(
             data = page.items,
             prevKey = if (offset == 0) null else (offset - limit).coerceAtLeast(0),
@@ -328,13 +463,8 @@ internal class LmsLibraryPagingSource(
         LoadResult.Error(exception)
     }
 
-    override fun getRefreshKey(state: PagingState<Int, LmsLibraryItem>): Int? =
-        state.anchorPosition?.let { position ->
-            state.closestPageToPosition(position)?.let { page ->
-                page.prevKey?.plus(state.config.pageSize)
-                    ?: page.nextKey?.minus(state.config.pageSize)
-            }
-        }
+    // Placeholders make the anchor position the absolute LMS result offset.
+    override fun getRefreshKey(state: PagingState<Int, LmsLibraryItem>): Int? = state.anchorPosition
 
     private companion object {
         const val MAX_PAGE_SIZE = 100
@@ -346,6 +476,8 @@ internal class LmsLibrarySearchPagingSource(
     private val activePlayer: LmsActivePlayer,
     private val term: String
 ) : PagingSource<Int, LmsLibraryItem>() {
+    override val jumpingSupported: Boolean = true
+
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, LmsLibraryItem> = try {
         val limit = params.loadSize.coerceIn(1, MAX_PAGE_SIZE)
         val firstPages = gateway.search(
@@ -404,13 +536,8 @@ internal class LmsLibrarySearchPagingSource(
         LoadResult.Error(exception)
     }
 
-    override fun getRefreshKey(state: PagingState<Int, LmsLibraryItem>): Int? =
-        state.anchorPosition?.let { position ->
-            state.closestPageToPosition(position)?.let { page ->
-                page.prevKey?.plus(state.config.pageSize)
-                    ?: page.nextKey?.minus(state.config.pageSize)
-            }
-        }
+    // Search pages use one global offset across artists, albums, and tracks.
+    override fun getRefreshKey(state: PagingState<Int, LmsLibraryItem>): Int? = state.anchorPosition
 
     private companion object {
         const val MAX_PAGE_SIZE = 100

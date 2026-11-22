@@ -34,6 +34,104 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryViewModelTest {
     @Test
+    fun tabsPreserveDeepLocationsAndAnchorsAcrossSwitchesAndRestore() {
+        runLibraryViewModelTest {
+            val viewModel = LibraryViewModel(FakeLibraryGateway(), LmsActivePlayerStore())
+            viewModel.selectTab(LibraryTab.ARTISTS)
+            viewModel.openItem(LmsLibraryItem("artist-1", LmsLibraryItemType.ARTIST, "Artist"))
+            advanceUntilIdle()
+            val artistLocations = viewModel.uiState.value.locationStack
+            val artistAnchor = LastSessionScrollAnchor(libraryLocationKey(artistLocations), "", "album-9", 9, 12)
+            viewModel.updateScrollAnchor(artistAnchor)
+
+            viewModel.selectTab(LibraryTab.SONGS)
+            advanceUntilIdle()
+            assertEquals(LmsLibraryQuery.TRACKS, viewModel.uiState.value.location.query)
+            val songLocations = viewModel.uiState.value.locationStack
+            val songAnchor = LastSessionScrollAnchor(libraryLocationKey(songLocations), "", "song-90000", 90000, 2)
+            viewModel.updateScrollAnchor(songAnchor)
+            viewModel.selectTab(LibraryTab.HOME)
+            advanceUntilIdle()
+            assertEquals(LibraryTab.SONGS, viewModel.uiState.value.lastVisitedTab)
+
+            val restored = LibraryViewModel(FakeLibraryGateway(), LmsActivePlayerStore())
+            restored.restoreSession(
+                locationStack = listOf(LibraryLocation("Library")),
+                searchText = "",
+                scrollAnchor = null,
+                activeTab = LibraryTab.HOME.name,
+                lastVisitedTab = viewModel.lastVisitedTab()?.name,
+                tabs = viewModel.savedTabs()
+            )
+            restored.selectTab(LibraryTab.ARTISTS)
+            advanceUntilIdle()
+            assertEquals(artistLocations, restored.uiState.value.locationStack)
+            assertEquals(artistAnchor, restored.uiState.value.scrollAnchor)
+            restored.selectTab(LibraryTab.SONGS)
+            advanceUntilIdle()
+            assertEquals(songLocations, restored.uiState.value.locationStack)
+            assertEquals(songAnchor, restored.uiState.value.scrollAnchor)
+        }
+    }
+
+    @Test
+    fun searchDoesNotOverwriteBrowseAnchorAndResetDropsOtherServerState() {
+        runLibraryViewModelTest {
+            val viewModel = LibraryViewModel(FakeLibraryGateway(), LmsActivePlayerStore())
+            viewModel.selectTab(LibraryTab.ALBUMS)
+            advanceUntilIdle()
+            val locations = viewModel.uiState.value.locationStack
+            val browse = LastSessionScrollAnchor(libraryLocationKey(locations), "", "album-90", 90, 0)
+            viewModel.updateScrollAnchor(browse)
+            viewModel.setSearchText("blue")
+            viewModel.updateScrollAnchor(browse.copy(searchText = "blue", index = 3))
+            viewModel.selectTab(LibraryTab.HOME)
+            viewModel.selectTab(LibraryTab.ALBUMS)
+            advanceUntilIdle()
+            assertEquals(browse, viewModel.uiState.value.scrollAnchor)
+
+            viewModel.resetToRoot()
+            viewModel.selectTab(LibraryTab.ALBUMS)
+            advanceUntilIdle()
+            assertEquals(null, viewModel.uiState.value.scrollAnchor)
+        }
+    }
+
+    @Test
+    fun browsePagingLoadsDeepSongPageWithoutEarlierPages() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            page = LmsLibraryPage(
+                listOf(LmsLibraryItem("song-90000", LmsLibraryItemType.TRACK, "Song")),
+                90000,
+                100001
+            )
+        }
+        val source = LmsLibraryPagingSource(gateway, activePlayer(), LmsLibraryQuery.TRACKS, LmsLibraryFilter())
+        val page = source.load(PagingSource.LoadParams.Refresh(90000, 30, true)) as PagingSource.LoadResult.Page
+        assertEquals(90000, gateway.requestedOffset)
+        assertEquals(30, gateway.requestedLimit)
+        assertEquals(90000, page.itemsBefore)
+        assertEquals(90001, page.nextKey)
+    }
+
+    @Test
+    fun browsePagingClampsRestoredOffsetWhenLibraryShrinks() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            page = LmsLibraryPage(
+                listOf(LmsLibraryItem("last", LmsLibraryItemType.TRACK, "Last song")),
+                0,
+                10
+            )
+        }
+        val source = LmsLibraryPagingSource(gateway, activePlayer(), LmsLibraryQuery.TRACKS, LmsLibraryFilter())
+        val result = source.load(PagingSource.LoadParams.Refresh(90000, 30, true)) as PagingSource.LoadResult.Page
+        assertEquals(9, gateway.requestedOffset)
+        assertEquals(9, result.itemsBefore)
+        assertEquals(0, result.itemsAfter)
+        assertEquals(null, result.nextKey)
+    }
+
+    @Test
     fun categoryNavigationBuildsAndTrimsTheBrowsePath() {
         runLibraryViewModelTest {
             val viewModel = LibraryViewModel(FakeLibraryGateway(), LmsActivePlayerStore())
@@ -269,12 +367,12 @@ class LibraryViewModelTest {
         assertEquals(0, page.prevKey)
         assertEquals(51, page.nextKey)
         assertEquals(100, gateway.requestedLimit)
-        assertEquals(20, source.getRefreshKey(pagingState(prevKey = 10, nextKey = 30)))
-        assertEquals(20, source.getRefreshKey(pagingState(prevKey = null, nextKey = 30)))
+        assertEquals(0, source.getRefreshKey(pagingState(prevKey = 10, nextKey = 30)))
+        assertEquals(0, source.getRefreshKey(pagingState(prevKey = null, nextKey = 30)))
 
         val searchSource = LmsLibrarySearchPagingSource(gateway, activePlayer(), "query")
-        assertEquals(20, searchSource.getRefreshKey(pagingState(prevKey = 10, nextKey = 30)))
-        assertEquals(20, searchSource.getRefreshKey(pagingState(prevKey = null, nextKey = 30)))
+        assertEquals(0, searchSource.getRefreshKey(pagingState(prevKey = 10, nextKey = 30)))
+        assertEquals(0, searchSource.getRefreshKey(pagingState(prevKey = null, nextKey = 30)))
     }
 
     @Test

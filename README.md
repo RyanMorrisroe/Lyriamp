@@ -9,15 +9,17 @@ Lyriamp is a native Android remote controller for [Lyrion Music Server (LMS)](ht
 - Connect manually to an LMS server over HTTP or HTTPS, with optional username and password.
 - Automatically save a server profile after a successful connection and reconnect to saved profiles from the Connections screen.
 - List server players, inspect their connection and power state, select a connected player, and control player power.
-- Browse artists, albums, genres, playlists, and their tracks with bounded infinite scrolling.
+- Browse Home, artists, albums, genres, songs, and playlists in tabs with bounded infinite scrolling.
+- Choose artwork-grid, compact, or comfortable layouts for artists, albums, and genres; songs, playlists, and search offer compact and comfortable lists. Layout choices are remembered separately by type.
 - Search artists, albums, and tracks across the library, and view LMS artwork when available.
+- Choose light, dark, or system appearance under Settings; colors follow the device's Android palette.
 - Play a track, album, or playlist now on the selected LMS player; playback remains on that player.
 - View current track title, artist, album, playback position, and duration.
 - Open a full-screen Now Playing view with artwork, seek, transport, volume, shuffle, and repeat controls.
 - Play, pause, stop, skip tracks, and seek when supported by the player.
 - Set volume, mute, shuffle mode, and repeat mode.
 - Save server profiles locally. Credentials are encrypted with Android Keystore AES-GCM.
-- Restore the last server, player, browse location, search, and list position on launch when available. If the saved player is unavailable, choose another connected player.
+- Restore the last server, player, active tab, search, and per-tab browse locations and positions on launch when available. If the saved player is unavailable, choose another connected player.
 - Switch players without leaving the current library location.
 - Expose the selected LMS player through an Android Media3 media session. Media-session transport commands are forwarded to LMS; the app does not decode or render audio.
 
@@ -39,8 +41,8 @@ No LMS version compatibility matrix has been published yet. A reachable LMS serv
 
 1. From Connections, choose **Add server** and enter a hostname or IP address without a scheme or path. The default port is `9000`; change it if your LMS server uses another port.
 2. Choose HTTP or HTTPS, enter LMS credentials if authentication is enabled, and connect. On API 37, grant local-network access when Android prompts for it. Successful connections are saved as profiles.
-3. Select a connected player to open the library. Browse a category or search artists, albums, and tracks. Select a track to play it; use an album or playlist's **Play** action to replace the current playlist and start playback.
-4. Use the player strip for transport and seek controls. Open the track details for full-screen Now Playing, including volume, shuffle, and repeat. Change players without losing the current library location; use **Servers** to switch connections.
+3. Select a connected player to open the library. Choose a tab or search artists, albums, and tracks. Use the layout controls in each view to choose how to browse. Select a track to play it; use an album or playlist's **Play** action to replace the current playlist and start playback.
+4. Use the player strip for transport and seek controls. Open the track details for full-screen Now Playing, including volume, shuffle, and repeat. Change players without losing the current library location; use **Settings → Connections** to switch servers and **Settings → Display** to change appearance.
 5. Select a saved server profile to reconnect immediately. On later launches, Lyriamp restores the last session automatically when its server and player are available. The saved-session snapshot contains no credentials.
 
 The app does not scan for servers. IPv4, hostnames, and IPv6 addresses can be entered manually.
@@ -90,7 +92,7 @@ The unfiltered app report is at `app/build/reports/kover/htmlDebug/index.html`; 
 
 The core gate includes LMS data logic, persistence repositories (excluding the Android Keystore adapter), connection and library ViewModels, and library paging. Compose screens, app/navigation wiring, and platform adapters are outside this JVM coverage gate; they remain visible in the full report and need appropriate UI or platform-level checks. Aim as close to 100% as practical for behavior-bearing core code, using tests that verify outcomes and meaningful edge cases rather than merely executing lines.
 
-The instrumented test source set currently contains a small app-context smoke test. Running it requires a connected API 36+ device or emulator:
+The instrumented tests include an app-context smoke test and library layout, display-settings, and large-library paging checks. Running them requires a connected API 36+ device or emulator:
 
 ```powershell
 .\gradlew.bat :app:connectedDebugAndroidTest

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lyriamp — library UX concepts</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #101015;
+      color: #f7f4f4;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .page { max-width: 1540px; margin: auto; padding: 48px 32px 80px; }
+    .eyebrow { color: #d7ad87; font-size: 11px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 10px 0 12px; font-size: clamp(32px, 4vw, 52px); letter-spacing: -.05em; }
+    .intro { max-width: 760px; color: #aca8b1; line-height: 1.65; }
+    .note { display: inline-block; margin: 12px 0 32px; padding: 9px 13px; border: 1px solid #39343a; border-radius: 9px; color: #c9c2c3; font-size: 12px; }
+    .concepts { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 30px; align-items: start; }
+    .concept { min-width: 0; }
+    .concept-label { display: flex; align-items: baseline; gap: 9px; margin: 0 0 10px; }
+    .concept-label span { color: #d7ad87; font-size: 12px; font-weight: 750; }
+    .concept-label h2 { margin: 0; font-size: 19px; letter-spacing: -.03em; }
+    .description { min-height: 60px; margin: 0 0 17px; color: #a7a3ad; font-size: 13px; line-height: 1.5; }
+    .phone { position: relative; width: 100%; max-width: 340px; height: 680px; overflow: hidden; border: 1px solid #514951; border-radius: 31px; background: #19171c; box-shadow: 0 20px 55px #0007, inset 0 0 0 4px #211e24; }
+    .status { height: 38px; display: flex; justify-content: space-between; align-items: end; padding: 0 20px 5px; font-size: 10px; font-weight: 700; }
+    .screen { height: 558px; overflow: hidden; padding: 7px 17px 0; }
+    .top { display: flex; justify-content: space-between; align-items: center; height: 42px; }
+    .top h3 { margin: 0; font-size: 23px; letter-spacing: -.045em; }
+    .top .tools { color: #e8dcd5; font-size: 18px; letter-spacing: 5px; white-space: nowrap; }
+    .back { color: #c5b7ad; font-size: 21px; margin-right: 7px; }
+    .search { margin: 10px 0 14px; padding: 11px 12px; border-radius: 12px; background: #302b32; color: #c1b7bd; font-size: 12px; }
+    .tabs { display: flex; gap: 14px; white-space: nowrap; overflow: hidden; border-bottom: 1px solid #3a333a; color: #a99fa6; font-size: 11px; font-weight: 650; }
+    .tabs span { padding: 10px 0; }
+    .tabs .active { border-bottom: 2px solid #e6b487; color: #f1d0b4; }
+    .section { display: flex; justify-content: space-between; align-items: center; margin: 17px 0 12px; }
+    .section strong { font-size: 12px; }
+    .section small { color: #b6a9ad; font-size: 10px; }
+    .toggle { display: flex; border: 1px solid #484047; border-radius: 8px; overflow: hidden; color: #aea4a9; font-size: 10px; }
+    .toggle span { padding: 6px 8px; }
+    .toggle .selected { color: #f8ded0; background: #51403c; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 17px 11px; }
+    .cover { position: relative; overflow: hidden; aspect-ratio: 1; background: #745a51; }
+    .cover::after { position: absolute; inset: 12%; border: 1px solid #ffffff3d; content: ""; }
+    .cover.one { background: linear-gradient(145deg, #dcaf77 0%, #bd765b 38%, #553d4b 39%, #2f303d 100%); }
+    .cover.two { background: radial-gradient(circle at 54% 37%, #eac89c 0 15%, transparent 16%), linear-gradient(140deg, #416d75, #102d39); }
+    .cover.three { background: linear-gradient(25deg, #bb785a 0 30%, #e1c19d 31% 42%, #5d6866 43% 65%, #232c36 66%); }
+    .cover.four { background: radial-gradient(ellipse at 50% 80%, #dda27f 0 26%, transparent 27%), linear-gradient(140deg, #5b4a65, #292338); }
+    .cover.five { background: linear-gradient(120deg, #405149 0 35%, #b8ac84 36% 58%, #6b6b50 59%); }
+    .cover.six { background: radial-gradient(circle at 30% 30%, #d7a47f, transparent 35%), #4d393d; }
+    .cover-name { position: absolute; bottom: 15%; left: 16%; max-width: 75%; color: #fff9; font-family: Georgia, serif; font-size: 12px; line-height: 1.1; letter-spacing: .08em; }
+    .album-title { margin-top: 6px; overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .album-artist { margin-top: 3px; overflow: hidden; color: #b5aab0; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .rows { margin-top: 2px; }
+    .row { display: flex; align-items: center; gap: 10px; min-height: 62px; border-bottom: 1px solid #332d34; }
+    .row.compact { min-height: 57px; }
+    .row .mini-cover { flex: 0 0 46px; border-radius: 5px; }
+    .row .text { min-width: 0; flex: 1; }
+    .row .name { overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .row .detail { overflow: hidden; margin-top: 5px; color: #ada2a9; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .row .action { flex: none; padding: 8px; color: #e6bc9e; font-size: 12px; }
+    .row .arrow { flex: none; color: #9e9299; font-size: 19px; }
+    .player { position: absolute; right: 9px; bottom: 9px; left: 9px; height: 72px; display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #5b4744; border-radius: 15px 15px 23px 23px; background: #403230; box-shadow: 0 -7px 20px #0003; }
+    .player .mini-cover { width: 43px; flex: 0 0 43px; border-radius: 6px; }
+    .player .text { min-width: 0; flex: 1; }
+    .player .name { overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .player .detail { margin-top: 4px; color: #cebab4; font-size: 10px; }
+    .player .controls { color: #fff5ec; font-size: 20px; letter-spacing: 3px; white-space: nowrap; }
+    .hero { margin: 18px 0 14px; }
+    .hero h4 { margin: 5px 0; font-size: 22px; letter-spacing: -.04em; }
+    .hero p { margin: 0; color: #aaa0a5; font-size: 11px; line-height: 1.5; }
+    .categories { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .category { height: 92px; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; border: 1px solid #514244; border-radius: 13px; background: linear-gradient(135deg, #443334, #302a31); }
+    .category:nth-child(2) { background: linear-gradient(135deg, #4a3a34, #302a31); }
+    .category:nth-child(3) { background: linear-gradient(135deg, #39403d, #292c30); }
+    .category:nth-child(4) { background: linear-gradient(135deg, #423949, #2d2932); }
+    .category .icon { color: #e6c1a8; font-size: 19px; }
+    .category .label { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; }
+    .recent { display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid #3d353d; border-radius: 12px; background: #242026; }
+    .recent .mini-cover { width: 42px; flex: 0 0 42px; border-radius: 5px; }
+    .recent strong { display: block; font-size: 11px; }
+    .recent small { display: block; margin-top: 4px; color: #aaa0a5; font-size: 10px; }
+    .takeaway { max-width: 340px; margin: 14px 0 0; color: #afa6aa; font-size: 12px; line-height: 1.5; }
+    .takeaway strong { color: #e6c1a8; }
+    .footer { margin-top: 48px; padding-top: 22px; border-top: 1px solid #373039; color: #aaa1a6; font-size: 13px; line-height: 1.7; }
+    .footer strong { color: #e8ddd7; }
+    @media (max-width: 680px) { .page { padding: 30px 18px 55px; } .concepts { grid-template-columns: 1fr; gap: 36px; } .description { min-height: 0; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="eyebrow">Lyriamp · exploration</div>
+    <h1>A better way to browse.</h1>
+    <p class="intro">Four directions for a music library that feels comfortable whether you browse by cover or scan a very large collection. Mix the navigation and layouts rather than choosing a single all-or-nothing design.</p>
+    <div class="note">Concept mockups · illustrative content and artwork · controls are not functional</div>
+
+    <div class="concepts">
+      <section class="concept">
+        <div class="concept-label"><span>01</span><h2>Cover wall</h2></div>
+        <p class="description">A visual album collection. Big artwork makes familiar records easy to find at a glance.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>◈ ▰</span></div>
+          <div class="screen">
+            <div class="top"><h3><span class="back">‹</span>Albums</h3><span class="tools">⌕ ⋮</span></div>
+            <div class="tabs"><span>Artists</span><span class="active">Albums</span><span>Genres</span><span>Playlists</span></div>
+            <div class="section"><strong>Browse albums</strong><div class="toggle"><span class="selected">▦ Grid</span><span>☰ List</span></div></div>
+            <div class="grid">
+              <div><div class="cover one"><span class="cover-name">GOLDEN<br>HOUR</span></div><div class="album-title">Golden Hour</div><div class="album-artist">The Paper Moons</div></div>
+              <div><div class="cover two"><span class="cover-name">BLUE<br>WAYS</span></div><div class="album-title">Blue Ways</div><div class="album-artist">Nora Vale</div></div>
+              <div><div class="cover three"><span class="cover-name">WIDE<br>OPEN</span></div><div class="album-title">Wide Open</div><div class="album-artist">Northbound</div></div>
+              <div><div class="cover four"><span class="cover-name">AFTER<br>THE RAIN</span></div><div class="album-title">After the Rain</div><div class="album-artist">June &amp; The Sea</div></div>
+              <div><div class="cover five"><span class="cover-name">FIELD<br>NOTES</span></div><div class="album-title">Field Notes</div><div class="album-artist">Lowland</div></div>
+              <div><div class="cover six"><span class="cover-name">STILL<br>HERE</span></div><div class="album-title">Still Here</div><div class="album-artist">Hollow Light</div></div>
+            </div>
+          </div>
+          <div class="player"><div class="cover one mini-cover"></div><div class="text"><div class="name">Morning Light</div><div class="detail">The Paper Moons</div></div><div class="controls">Ⅱ ▸▸</div></div>
+        </div>
+        <p class="takeaway"><strong>Trade-off:</strong> Most visual, fewest albums visible. Open a cover to browse; Play remains a separate action.</p>
+      </section>
+
+      <section class="concept">
+        <div class="concept-label"><span>02</span><h2>Compact library</h2></div>
+        <p class="description">More information in less space, with a quiet layout designed for fast scanning.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>◈ ▰</span></div>
+          <div class="screen">
+            <div class="top"><h3><span class="back">‹</span>Albums</h3><span class="tools">⌕ ⋮</span></div>
+            <div class="tabs"><span>Artists</span><span class="active">Albums</span><span>Genres</span><span>Playlists</span></div>
+            <div class="section"><strong>Browse albums</strong><div class="toggle"><span>▦ Grid</span><span class="selected">☰ List</span></div></div>
+            <div class="rows">
+              <div class="row compact"><div class="text"><div class="name">After the Rain</div><div class="detail">June &amp; The Sea · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row compact"><div class="text"><div class="name">Blue Ways</div><div class="detail">Nora Vale · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row compact"><div class="text"><div class="name">Field Notes</div><div class="detail">Lowland · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row compact"><div class="text"><div class="name">Golden Hour</div><div class="detail">The Paper Moons · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row compact"><div class="text"><div class="name">Still Here</div><div class="detail">Hollow Light · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row compact"><div class="text"><div class="name">The Long Way Home</div><div class="detail">Mira Wells · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row compact"><div class="text"><div class="name">Wide Open</div><div class="detail">Northbound · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+            </div>
+          </div>
+          <div class="player"><div class="cover one mini-cover"></div><div class="text"><div class="name">Morning Light</div><div class="detail">The Paper Moons</div></div><div class="controls">Ⅱ ▸▸</div></div>
+        </div>
+        <p class="takeaway"><strong>Trade-off:</strong> More rows and less visual noise; users give up immediate cover recognition.</p>
+      </section>
+
+      <section class="concept">
+        <div class="concept-label"><span>03</span><h2>Comfortable hybrid</h2></div>
+        <p class="description">Familiar artwork rows, clearer spacing, and a balance between recognition and detail.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>◈ ▰</span></div>
+          <div class="screen">
+            <div class="top"><h3><span class="back">‹</span>Albums</h3><span class="tools">⌕ ⋮</span></div>
+            <div class="tabs"><span>Artists</span><span class="active">Albums</span><span>Genres</span><span>Playlists</span></div>
+            <div class="section"><strong>Browse albums</strong><div class="toggle"><span>▦</span><span class="selected">≡</span><span>☰</span></div></div>
+            <div class="rows">
+              <div class="row"><div class="cover four mini-cover"></div><div class="text"><div class="name">After the Rain</div><div class="detail">June &amp; The Sea · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row"><div class="cover two mini-cover"></div><div class="text"><div class="name">Blue Ways</div><div class="detail">Nora Vale · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row"><div class="cover five mini-cover"></div><div class="text"><div class="name">Field Notes</div><div class="detail">Lowland · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row"><div class="cover one mini-cover"></div><div class="text"><div class="name">Golden Hour</div><div class="detail">The Paper Moons · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row"><div class="cover six mini-cover"></div><div class="text"><div class="name">Still Here</div><div class="detail">Hollow Light · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+              <div class="row"><div class="cover three mini-cover"></div><div class="text"><div class="name">Wide Open</div><div class="detail">Northbound · Album</div></div><span class="action">▶</span><span class="arrow">›</span></div>
+            </div>
+          </div>
+          <div class="player"><div class="cover one mini-cover"></div><div class="text"><div class="name">Morning Light</div><div class="detail">The Paper Moons</div></div><div class="controls">Ⅱ ▸▸</div></div>
+        </div>
+        <p class="takeaway"><strong>Trade-off:</strong> A versatile default, though neither as visual as the grid nor as dense as the compact list.</p>
+      </section>
+
+      <section class="concept">
+        <div class="concept-label"><span>04</span><h2>Browse-first hub</h2></div>
+        <p class="description">A welcoming starting point. Pair this navigation with any of the results layouts.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>◈ ▰</span></div>
+          <div class="screen">
+            <div class="top"><h3>Library</h3><span class="tools">♬ ⋮</span></div>
+            <div class="search">⌕ &nbsp; Search artists, albums, and tracks</div>
+            <div class="hero"><span class="eyebrow">Your collection</span><h4>What sounds good?</h4><p>Browse your music, your way.</p></div>
+            <div class="categories">
+              <div class="category"><span class="icon">♙</span><span class="label">Artists <span>›</span></span></div>
+              <div class="category"><span class="icon">▦</span><span class="label">Albums <span>›</span></span></div>
+              <div class="category"><span class="icon">◈</span><span class="label">Genres <span>›</span></span></div>
+              <div class="category"><span class="icon">♫</span><span class="label">Playlists <span>›</span></span></div>
+            </div>
+            <div class="section"><strong>Pick up where you left off</strong><small>Last visited</small></div>
+            <div class="recent"><div class="cover one mini-cover"></div><div><strong>The Paper Moons</strong><small>Artists › Albums</small></div><span style="margin-left:auto;color:#b5a8ad">›</span></div>
+          </div>
+          <div class="player"><div class="cover one mini-cover"></div><div class="text"><div class="name">Morning Light</div><div class="detail">The Paper Moons</div></div><div class="controls">Ⅱ ▸▸</div></div>
+        </div>
+        <p class="takeaway"><strong>Trade-off:</strong> Easy orientation, but adds a starting screen. Last visited appears only when available.</p>
+      </section>
+    </div>
+    <div class="footer"><strong>Designed for real collections.</strong> The intended implementation would retain bounded paging, load appropriately sized artwork around the visible viewport, and preserve navigation, search, playback actions, and restoration. Search, switching players and servers, accessibility, empty states, and retry states remain part of the experience; these illustrations focus on layout rather than every screen state.</div>
+  </main>
+</body>
+</html>
