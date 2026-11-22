@@ -18,6 +18,8 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryPage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySearchResults
+import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
+import com.ryanmorrisroe.lyriamp.data.lms.isLmsArtworkId
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionTabSnapshot
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionLocation
@@ -46,6 +48,12 @@ data class LibraryLocation(
 data class LibraryCategory(
     val title: String,
     val query: LmsLibraryQuery
+)
+
+private data class ArtistArtworkCacheKey(
+    val serverUrl: String,
+    val username: String?,
+    val artistId: String
 )
 
 enum class LibraryTab(val title: String, val query: LmsLibraryQuery?) {
@@ -103,6 +111,11 @@ class LibraryViewModel(
     private val mutableSelectedTab = MutableStateFlow(LibraryTab.HOME)
     private val mutableLastVisitedTab = MutableStateFlow<LibraryTab?>(null)
     private val mutableTabs = MutableStateFlow<Map<LibraryTab, LibraryTabState>>(emptyMap())
+    private val artistArtworkCache = LinkedHashMap<ArtistArtworkCacheKey, String>(
+        MAX_CACHED_ARTIST_ARTWORK,
+        0.75f,
+        true
+    )
     private val tabState = combine(mutableSelectedTab, mutableLastVisitedTab, mutableTabs) { selected, last, tabs ->
         Triple(selected, last, tabs)
     }
@@ -364,6 +377,34 @@ class LibraryViewModel(
         mutableMessage.value = null
     }
 
+    suspend fun resolveArtistArtwork(
+        connection: LmsServerConnection,
+        item: LmsLibraryItem
+    ): String? {
+        val cacheKey = ArtistArtworkCacheKey(
+            serverUrl = connection.jsonRpcUrl(),
+            username = connection.username,
+            artistId = item.id
+        )
+        synchronized(artistArtworkCache) {
+            artistArtworkCache[cacheKey]?.let { return it }
+        }
+
+        val itemArtworkUrl = item.artworkUrl?.takeIf(String::isNotBlank)
+            ?: item.artworkId?.takeIf(String::isLmsArtworkId)?.let { "/music/$it/cover.jpg" }
+        val artworkUrl = itemArtworkUrl
+            ?: libraryGateway.getArtistArtworkUrl(connection, item.id)
+            ?: return null
+
+        synchronized(artistArtworkCache) {
+            artistArtworkCache[cacheKey] = artworkUrl
+            if (artistArtworkCache.size > MAX_CACHED_ARTIST_ARTWORK) {
+                artistArtworkCache.remove(artistArtworkCache.keys.first())
+            }
+        }
+        return artworkUrl
+    }
+
     fun playNow(item: LmsLibraryItem) {
         val player = activePlayerStore.activePlayer.value
         if (player == null) {
@@ -410,6 +451,7 @@ class LibraryViewModel(
 
     private companion object {
         const val PAGE_SIZE = 30
+        const val MAX_CACHED_ARTIST_ARTWORK = 256
         const val SEARCH_DEBOUNCE_MILLIS = 300L
         val pagingConfig = PagingConfig(
             pageSize = PAGE_SIZE,

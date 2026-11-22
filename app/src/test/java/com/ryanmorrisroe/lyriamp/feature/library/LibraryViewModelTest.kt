@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -33,6 +34,18 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryViewModelTest {
+    @Test
+    fun libraryItemKeysAreUniqueWhenLmsReturnsDuplicateIds() {
+        val artist = LmsLibraryItem("8115", LmsLibraryItemType.ARTIST, "Artist")
+        val duplicateArtist = artist.copy(title = "Duplicate")
+
+        assertEquals("ARTIST:8115", libraryItemKey(artist, 0, listOf(artist)))
+        assertNotEquals(
+            libraryItemKey(artist, 0, listOf(artist, duplicateArtist)),
+            libraryItemKey(duplicateArtist, 1, listOf(artist, duplicateArtist))
+        )
+    }
+
     @Test
     fun tabsPreserveDeepLocationsAndAnchorsAcrossSwitchesAndRestore() {
         runLibraryViewModelTest {
@@ -450,6 +463,42 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun cachesResolvedArtistArtworkForRowsRevisitedAfterScrolling() {
+        runLibraryViewModelTest {
+            val gateway = FakeLibraryGateway().apply {
+                artistArtworkUrl = "/music/cover-42/cover.jpg"
+            }
+            val viewModel = LibraryViewModel(gateway, LmsActivePlayerStore())
+            val connection = LmsServerConnection("lms.local")
+            val nativeArtist = LmsLibraryItem(
+                "42",
+                LmsLibraryItemType.ARTIST,
+                "Artist",
+                artworkUrl = "/contributor/portrait-42/image"
+            )
+            val noArtArtist = LmsLibraryItem("43", LmsLibraryItemType.ARTIST, "Artist 43")
+
+            assertEquals(
+                "/contributor/portrait-42/image",
+                viewModel.resolveArtistArtwork(connection, nativeArtist)
+            )
+            assertEquals(
+                "/contributor/portrait-42/image",
+                viewModel.resolveArtistArtwork(connection, nativeArtist.copy(artworkUrl = null))
+            )
+            assertEquals(0, gateway.artistArtworkRequestCount)
+
+            assertEquals("/music/cover-42/cover.jpg", viewModel.resolveArtistArtwork(connection, noArtArtist))
+            assertEquals("/music/cover-42/cover.jpg", viewModel.resolveArtistArtwork(connection, noArtArtist))
+            assertEquals(1, gateway.artistArtworkRequestCount)
+
+            viewModel.resolveArtistArtwork(connection.copy(host = "other.local"), noArtArtist)
+            assertEquals(2, gateway.artistArtworkRequestCount)
+            advanceUntilIdle()
+        }
+    }
+
+    @Test
     fun factoryCreatesLibraryViewModelAndRejectsUnsupportedTypes() {
         val factory = LibraryViewModel.Factory(FakeLibraryGateway(), LmsActivePlayerStore())
 
@@ -468,6 +517,8 @@ class LibraryViewModelTest {
         var requestedLimit: Int? = null
         var playedItem: LmsLibraryItem? = null
         var playedPlayerId: String? = null
+        var artistArtworkUrl: String? = null
+        var artistArtworkRequestCount = 0
         var pageError: Exception? = null
         var playNowError: Exception? = null
 
@@ -493,6 +544,14 @@ class LibraryViewModelTest {
         ): LmsLibrarySearchResults {
             searchRequests += offset to limit
             return searchHandler(offset, limit)
+        }
+
+        override suspend fun getArtistArtworkUrl(
+            connection: LmsServerConnection,
+            artistId: String
+        ): String? {
+            artistArtworkRequestCount++
+            return artistArtworkUrl
         }
 
         override suspend fun playNow(

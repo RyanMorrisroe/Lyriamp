@@ -135,7 +135,7 @@ class LmsJsonRpcClientTest {
                 """
                 {"id":1,"result":{"count":101,"albums_loop":[
                                     {"id":42,"album":"Blue Train","artist":"John Coltrane",
-                   "artwork_track_id":501,"artwork_url":"https://art.example/cover.jpg"}
+                   "artwork_track_id":501,"artwork_url":"../imageproxy/cover.jpg"}
                 ]}}
                 """.trimIndent()
             )
@@ -160,14 +160,172 @@ class LmsJsonRpcClientTest {
                     title = "Blue Train",
                     artist = "John Coltrane",
                     artworkId = "501",
-                    artworkUrl = "https://art.example/cover.jpg"
+                    artworkUrl = "../imageproxy/cover.jpg"
                 ),
                 page.items.single()
             )
             val command = capturedCommand(capturedRequest)
             assertEquals(
-                listOf("albums", "50", "40", "tags:laJK", "artist_id:7", "search:blue train"),
+                listOf("albums", "50", "40", "tags:aljK", "artist_id:7", "search:blue train"),
                 command
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun requestsAlbumArtistPortraitsForArtistPages() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """{"id":1,"result":{"count":1,"artists_loop":[
+                    {"id":7,"artist":"Album Artist","portraitid":"portrait-42"}
+                ]}}"""
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.ARTISTS,
+                offset = 0,
+                limit = 30
+            )
+
+            assertEquals("Album Artist", page.items.single().title)
+            assertEquals("/contributor/portrait-42/image", page.items.single().artworkUrl)
+            assertEquals(
+                listOf("artists", "0", "30", "tags:4", "role_id:ALBUMARTIST"),
+                capturedCommand(capturedRequest)
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun doesNotRequestArtworkForGenrePages() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """{"id":1,"result":{"count":1,"genres_loop":[
+                    {"id":3,"genre":"Jazz"}
+                ]}}"""
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.GENRES,
+                offset = 0,
+                limit = 30
+            )
+
+            assertEquals("Jazz", page.items.single().title)
+            assertEquals(null, page.items.single().artworkId)
+            assertEquals(null, page.items.single().artworkUrl)
+            assertEquals(listOf("genres", "0", "30"), capturedCommand(capturedRequest))
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun looksUpAlbumArtistArtworkFromMusicArtistInfoPhotoList() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """{"id":1,"result":{"item_loop":[
+                    {"artist_id":"42","url":"https://images.example/artist-42-first.jpg"},
+                    {"artist_id":"42","url":"https://images.example/artist-42-second.jpg"}
+                ],"count":2,"offset":0}}"""
+            )
+        })
+
+        try {
+            val artworkUrl = LmsJsonRpcClient(client).getArtistArtworkUrl(
+                connection = LmsServerConnection("lms.local"),
+                artistId = "42"
+            )
+
+            assertEquals("https://images.example/artist-42-first.jpg", artworkUrl)
+            assertEquals("-", capturedPlayerId(capturedRequest))
+            assertEquals(
+                listOf("musicartistinfo", "artistphotos", "artist_id:42"),
+                capturedCommand(capturedRequest)
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun fallsBackToFirstAlbumCoverWhenAlbumArtistPortraitIsUnavailable() = runBlocking {
+        val capturedCommands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            val command = capturedCommand(request)
+            capturedCommands += command
+            when (command.first()) {
+                "musicartistinfo" -> respondJson(
+                    """{"id":1,"result":{"error":"No artist photo found"}}"""
+                )
+                "albums" -> respondJson(
+                    """{"id":1,"result":{"count":1,"albums_loop":[
+                        {"id":8,"album":"First Album","artist":"Album Artist","artwork_track_id":"cover-8"}
+                    ]}}"""
+                )
+                else -> error("Unexpected LMS command: $command")
+            }
+        })
+
+        try {
+            val artworkUrl = LmsJsonRpcClient(client).getArtistArtworkUrl(
+                connection = LmsServerConnection("lms.local"),
+                artistId = "42"
+            )
+
+            assertEquals("/music/cover-8/cover.jpg", artworkUrl)
+            assertEquals(
+                listOf(
+                    listOf("musicartistinfo", "artistphotos", "artist_id:42"),
+                    listOf("albums", "0", "1", "tags:aljK", "artist_id:42")
+                ),
+                capturedCommands
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun requestsArtworkTrackIdForTrackPages() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """{"id":1,"result":{"count":1,"titles_loop":[
+                    {"id":7,"title":"Track","artwork_track_id":501}
+                ]}}"""
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.TRACKS,
+                offset = 0,
+                limit = 30
+            )
+
+            assertEquals("501", page.items.single().artworkId)
+            assertEquals(
+                listOf("titles", "0", "30", "tags:galdeKJc"),
+                capturedCommand(capturedRequest)
             )
         } finally {
             client.close()
@@ -235,7 +393,7 @@ class LmsJsonRpcClientTest {
                 {"id":1,"result":{
                   "contributors_count":2,"contributors_loop":[{"contributor_id":3,"contributor":"Artist"}],
                   "albums_count":4,"albums_loop":[{"album_id":5,"album":"Album","artwork":6}],
-                  "tracks_count":8,"tracks_loop":[{"track_id":7,"track":"Track","coverid":8}]
+                  "tracks_count":8,"tracks_loop":[{"track_id":7,"track":"Track","coverid":"5466de2c"}]
                 }}
                 """.trimIndent()
             )
@@ -252,7 +410,7 @@ class LmsJsonRpcClientTest {
             assertEquals(listOf("Artist"), results.artists.items.map { it.title })
             assertEquals(2, results.artists.totalCount)
             assertEquals("6", results.albums.items.single().artworkId)
-            assertEquals("8", results.tracks.items.single().artworkId)
+            assertEquals("5466de2c", results.tracks.items.single().artworkId)
             assertEquals(8, results.tracks.totalCount)
             assertEquals(
                 listOf("search", "20", "10", "term:blue train", "extended:1"),
@@ -364,7 +522,8 @@ class LmsJsonRpcClientTest {
             respondJson(
                 """
                 {"id":1,"result":{"mode":"play","time":"32.5","can_seek":1,
-                  "playlist_loop":[{"title":"Track","artist":"Artist","album":"Album","duration":"210"}]}}
+                  "playlist_loop":[{"title":"Track","artist":"Artist","album":"Album","duration":"210",
+                    "coverid":27,"artwork_url":"../imageproxy/cover.jpg"}]}}
                 """.trimIndent()
             )
         })
@@ -379,6 +538,8 @@ class LmsJsonRpcClientTest {
             assertEquals("Track", status.title)
             assertEquals("Artist", status.artist)
             assertEquals("Album", status.album)
+            assertEquals("27", status.artworkId)
+            assertEquals("../imageproxy/cover.jpg", status.artworkUrl)
             assertEquals(32.5, status.positionSeconds, 0.0)
             assertEquals(210.0, status.durationSeconds!!, 0.0)
             assertTrue(status.canSeek)
@@ -392,6 +553,10 @@ class LmsJsonRpcClientTest {
             assertEquals(
                 "status",
                 requestJson["params"]?.jsonArray?.get(1)?.jsonArray?.get(0)?.jsonPrimitive?.content
+            )
+            assertEquals(
+                listOf("status", "-", "1", "tags:cgABKJ"),
+                capturedCommand(capturedRequest)
             )
         } finally {
             client.close()
@@ -548,6 +713,11 @@ class LmsJsonRpcClientTest {
     private fun capturedCommand(request: HttpRequestData?): List<String> {
         val requestJson = Json.parseToJsonElement((request?.body as TextContent).text).jsonObject
         return requestJson["params"]!!.jsonArray[1].jsonArray.map { it.jsonPrimitive.content }
+    }
+
+    private fun capturedPlayerId(request: HttpRequestData?): String {
+        val requestJson = Json.parseToJsonElement((request?.body as TextContent).text).jsonObject
+        return requestJson["params"]!!.jsonArray[0].jsonPrimitive.content
     }
 
     private suspend fun MockRequestHandleScope.respondJson(body: String): HttpResponseData =

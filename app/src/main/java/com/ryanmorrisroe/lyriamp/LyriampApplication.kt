@@ -1,6 +1,9 @@
 package com.ryanmorrisroe.lyriamp
 
 import android.app.Application
+import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayerStore
 import com.ryanmorrisroe.lyriamp.data.lms.LmsConnectionGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsJsonRpcClient
@@ -22,6 +25,21 @@ import io.ktor.client.plugins.HttpTimeout
 
 class LyriampApplication : Application() {
     val activePlayerStore = LmsActivePlayerStore()
+    val artworkImageLoader: ImageLoader by lazy {
+        ImageLoader.Builder(applicationContext)
+            .memoryCache {
+                MemoryCache.Builder(applicationContext)
+                    .maxSizePercent(0.15)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("artwork"))
+                    .maxSizePercent(0.02)
+                    .build()
+            }
+            .build()
+    }
     val savedServerRepository: SavedServerRepository by lazy {
         DataStoreSavedServerRepository(
             applicationContext.savedServerDataStore,

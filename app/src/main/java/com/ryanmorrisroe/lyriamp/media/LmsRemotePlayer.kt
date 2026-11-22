@@ -1,42 +1,62 @@
 package com.ryanmorrisroe.lyriamp.media
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Looper
 import androidx.concurrent.futures.CallbackToFutureAdapter
+import androidx.core.graphics.drawable.toBitmap
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
+import coil.ImageLoader
+import coil.request.SuccessResult
 import com.google.common.util.concurrent.ListenableFuture
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayer
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayerStore
+import com.ryanmorrisroe.lyriamp.data.lms.LmsArtworkSource
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerRemoteGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
+import com.ryanmorrisroe.lyriamp.data.lms.artworkSource
+import com.ryanmorrisroe.lyriamp.ui.artwork.lmsArtworkImageRequest
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @UnstableApi
 class LmsRemotePlayer(
     activePlayerStore: LmsActivePlayerStore,
-    private val remoteGateway: LmsPlayerRemoteGateway
+    private val remoteGateway: LmsPlayerRemoteGateway,
+    private val context: Context,
+    private val imageLoader: ImageLoader
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var activePlayer: LmsActivePlayer? = null
     private var playbackStatus: LmsPlayerStatus? = null
     private var pendingPlayWhenReady: Boolean? = null
+    private var artworkJob: Job? = null
+    private var artworkSourceUrl: String? = null
+    private var artworkData: ByteArray? = null
 
     init {
         scope.launch {
             activePlayerStore.activePlayer.collectLatest { player ->
+                artworkJob?.cancel()
+                artworkSourceUrl = null
+                artworkData = null
                 activePlayer = player
                 playbackStatus = null
                 pendingPlayWhenReady = null
@@ -155,6 +175,7 @@ class LmsRemotePlayer(
             val status = remoteGateway.getPlayerStatus(player.connection, player.playerId)
             if (activePlayer == player) {
                 playbackStatus = status
+                loadArtwork(player, status)
                 invalidateState()
             }
         } catch (exception: CancellationException) {
@@ -188,14 +209,57 @@ class LmsRemotePlayer(
             "lms-no-op"
         }
 
+    private fun loadArtwork(player: LmsActivePlayer, status: LmsPlayerStatus) {
+        val source = player.connection.artworkSource(status.artworkId, status.artworkUrl)
+        if (source?.url == artworkSourceUrl) return
+
+        artworkJob?.cancel()
+        artworkSourceUrl = source?.url
+        artworkData = null
+        if (source == null) return
+
+        artworkJob = scope.launch {
+            val data = withContext(Dispatchers.IO) { loadArtworkData(source) }
+            if (activePlayer == player && artworkSourceUrl == source.url) {
+                artworkData = data
+                invalidateState()
+            }
+        }
+    }
+
+    private suspend fun loadArtworkData(source: LmsArtworkSource): ByteArray? {
+        val result = imageLoader.execute(lmsArtworkImageRequest(context, source, ARTWORK_DATA_SIZE))
+        if (result !is SuccessResult) return null
+
+        return withContext(Dispatchers.IO) {
+            val bitmap = result.drawable.toBitmap(ARTWORK_DATA_SIZE, ARTWORK_DATA_SIZE)
+            ByteArrayOutputStream().use { output ->
+                if (bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)) {
+                    output.toByteArray()
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
     private fun LmsPlayerStatus.toMediaItemData(player: LmsActivePlayer): MediaItemData {
-        val metadata = MediaMetadata.Builder()
+        val artwork = player.connection.artworkSource(artworkId, artworkUrl)
+        val metadataBuilder = MediaMetadata.Builder()
             .setTitle(title ?: player.playerName)
             .setArtist(artist)
             .setAlbumTitle(album)
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .setIsPlayable(true)
-            .build()
+        if (artwork != null) {
+            metadataBuilder.setArtworkUri(Uri.parse(artwork.url))
+            if (artwork.url == artworkSourceUrl) {
+                artworkData?.let {
+                    metadataBuilder.setArtworkData(it, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                }
+            }
+        }
+        val metadata = metadataBuilder.build()
         val mediaItem = MediaItem.Builder()
             .setMediaId(player.playerId)
             .setMediaMetadata(metadata)
@@ -205,5 +269,9 @@ class LmsRemotePlayer(
             .setDurationUs(durationSeconds?.let { (it * 1_000_000).toLong() } ?: C.TIME_UNSET)
             .setIsSeekable(canSeek)
             .build()
+    }
+
+    private companion object {
+        const val ARTWORK_DATA_SIZE = 512
     }
 }

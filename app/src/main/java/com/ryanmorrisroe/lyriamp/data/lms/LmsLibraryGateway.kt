@@ -78,6 +78,11 @@ interface LmsLibraryGateway {
         limit: Int
     ): LmsLibrarySearchResults
 
+    suspend fun getArtistArtworkUrl(
+        connection: LmsServerConnection,
+        artistId: String
+    ): String?
+
     suspend fun playNow(
         connection: LmsServerConnection,
         playerId: String,

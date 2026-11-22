@@ -1,5 +1,6 @@
 package com.ryanmorrisroe.lyriamp.feature.library
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -73,7 +74,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -86,28 +86,29 @@ import androidx.media3.common.Player
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
-import androidx.paging.compose.itemKey
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayer
-import com.ryanmorrisroe.lyriamp.data.lms.basicAuthorizationHeader
+import com.ryanmorrisroe.lyriamp.data.lms.LmsHttpException
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItem
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
+import com.ryanmorrisroe.lyriamp.data.lms.LmsProtocolException
 import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
+import com.ryanmorrisroe.lyriamp.data.lms.artworkSource
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryLayout
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
-import io.ktor.http.HttpHeaders
-import java.net.URI
+import com.ryanmorrisroe.lyriamp.ui.artwork.LmsArtworkImage
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import java.io.IOException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
@@ -142,7 +143,17 @@ fun LibraryScreen(
         LmsLibraryQuery.PLAYLISTS -> LibraryViewType.PLAYLISTS
         null -> null
     }
-    val layout = viewType?.let(displayState.preferences::layoutFor) ?: LibraryLayout.COMFORTABLE
+    val layout = if (viewType == LibraryViewType.GENRES) {
+        LibraryLayout.COMPACT
+    } else {
+        viewType?.let(displayState.preferences::layoutFor) ?: LibraryLayout.COMFORTABLE
+    }
+    val artistArtworkResolver: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)? =
+        if (state.searchText.isBlank() && state.location.query == LmsLibraryQuery.ARTISTS) {
+            viewModel::resolveArtistArtwork
+        } else {
+            null
+        }
     val restoredAnchor = state.scrollAnchor?.takeIf {
         it.locationKey == libraryLocationKey(state.locationStack) &&
             it.searchText == state.searchText
@@ -512,11 +523,13 @@ fun LibraryScreen(
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 1
                         )
-                        LibraryLayoutSelector(
-                            viewType = viewType,
-                            selectedLayout = layout,
-                            onSelect = { displayPreferencesViewModel.setLayout(viewType, it) }
-                        )
+                        if (viewType != LibraryViewType.GENRES) {
+                            LibraryLayoutSelector(
+                                viewType = viewType,
+                                selectedLayout = layout,
+                                onSelect = { displayPreferencesViewModel.setLayout(viewType, it) }
+                            )
+                        }
                     }
                 }
                 LibraryResults(
@@ -527,12 +540,26 @@ fun LibraryScreen(
                     isPlayingItem = state.isPlayingItem,
                     onOpenItem = viewModel::openItem,
                     onPlayNow = viewModel::playNow,
+                    onResolveArtistArtwork = artistArtworkResolver,
                     onRetry = items::retry
                 )
             }
         }
     }
 
+}
+
+internal fun libraryItemKey(
+    item: LmsLibraryItem,
+    index: Int,
+    loadedItems: List<LmsLibraryItem>
+): String {
+    val identity = "${item.type}:${item.id}"
+    return if (loadedItems.count { it.type == item.type && it.id == item.id } > 1) {
+        "$identity:$index"
+    } else {
+        identity
+    }
 }
 
 @Composable
@@ -544,6 +571,7 @@ private fun LibraryResults(
     isPlayingItem: Boolean,
     onOpenItem: (LmsLibraryItem) -> Unit,
     onPlayNow: (LmsLibraryItem) -> Unit,
+    onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     onRetry: () -> Unit
 ) {
     LazyVerticalGrid(
@@ -569,7 +597,11 @@ private fun LibraryResults(
         }
         items(
             count = items.itemCount,
-            key = items.itemKey { "${it.type}:${it.id}" }
+            key = { index ->
+                items.peek(index)?.let {
+                    libraryItemKey(it, index, items.itemSnapshotList.items)
+                } ?: "library-placeholder:$index"
+            }
         ) { index ->
             val item = items[index]
             if (item != null) {
@@ -578,6 +610,7 @@ private fun LibraryResults(
                         item = item,
                         connection = activePlayer?.connection,
                         isPlayingItem = isPlayingItem,
+                        onResolveArtistArtwork = onResolveArtistArtwork,
                         onOpen = { onOpenItem(item) },
                         onPlayNow = { onPlayNow(item) }
                     )
@@ -587,6 +620,7 @@ private fun LibraryResults(
                         connection = activePlayer?.connection,
                         showArtwork = layout == LibraryLayout.COMFORTABLE,
                         isPlayingItem = isPlayingItem,
+                        onResolveArtistArtwork = onResolveArtistArtwork,
                         onOpen = { onOpenItem(item) },
                         onPlayNow = { onPlayNow(item) }
                     )
@@ -611,6 +645,7 @@ private fun LibraryItemRow(
     connection: LmsServerConnection?,
     showArtwork: Boolean,
     isPlayingItem: Boolean,
+    onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit
 ) {
@@ -627,7 +662,14 @@ private fun LibraryItemRow(
             if (item.type == LmsLibraryItemType.TRACK) onPlayNow() else onOpen()
         },
         leadingContent = if (showArtwork) {
-            { LibraryArtwork(item, connection, Modifier.size(52.dp)) }
+            {
+                LibraryArtwork(
+                    item = item,
+                    connection = connection,
+                    onResolveArtistArtwork = onResolveArtistArtwork,
+                    modifier = Modifier.size(52.dp)
+                )
+            }
         } else null,
         headlineContent = { Text(item.title, maxLines = 1) },
         supportingContent = {
@@ -648,6 +690,7 @@ private fun LibraryItemCard(
     item: LmsLibraryItem,
     connection: LmsServerConnection?,
     isPlayingItem: Boolean,
+    onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit
 ) {
@@ -655,6 +698,7 @@ private fun LibraryItemCard(
         LibraryArtwork(
             item,
             connection,
+            onResolveArtistArtwork,
             Modifier.fillMaxWidth().aspectRatio(1f)
         )
         Text(item.title, maxLines = 1, style = MaterialTheme.typography.titleSmall)
@@ -666,26 +710,81 @@ private fun LibraryItemCard(
 }
 
 @Composable
-private fun LibraryArtwork(item: LmsLibraryItem, connection: LmsServerConnection?, modifier: Modifier) {
-    val context = LocalContext.current
-    val imageRequest = remember(item, connection) { connection?.artworkRequest(context, item) }
+private fun LibraryArtwork(
+    item: LmsLibraryItem,
+    connection: LmsServerConnection?,
+    onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
+    modifier: Modifier
+) {
+    var resolvedArtistArtworkUrl by remember(
+        item.type,
+        item.id,
+        item.artworkId,
+        item.artworkUrl,
+        connection
+    ) {
+        mutableStateOf(item.artworkUrl)
+    }
+    LaunchedEffect(
+        item.type,
+        item.id,
+        item.artworkId,
+        item.artworkUrl,
+        connection,
+        onResolveArtistArtwork != null
+    ) {
+        val resolver = onResolveArtistArtwork
+        if (item.type == LmsLibraryItemType.ARTIST &&
+            connection != null &&
+            resolver != null
+        ) {
+            try {
+                resolvedArtistArtworkUrl = resolver(connection, item)
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: LmsProtocolException) {
+                logArtistArtworkLookupFailure(exception)
+            } catch (exception: LmsHttpException) {
+                logArtistArtworkLookupFailure(exception)
+            } catch (exception: HttpRequestTimeoutException) {
+                logArtistArtworkLookupFailure(exception)
+            } catch (exception: IOException) {
+                logArtistArtworkLookupFailure(exception)
+            }
+        }
+    }
     Surface(
         modifier = modifier.clip(RoundedCornerShape(4.dp)),
         color = MaterialTheme.colorScheme.surfaceVariant
     ) {
-        androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
+        LmsArtworkImage(
+            connection = connection,
+            artworkId = if (item.type == LmsLibraryItemType.ARTIST &&
+                resolvedArtistArtworkUrl != null
+            ) {
+                null
+            } else {
+                item.artworkId
+            },
+            artworkUrl = resolvedArtistArtworkUrl ?: item.artworkUrl,
+            contentDescription = "${item.title} artwork",
+            modifier = Modifier.fillMaxSize()
+        ) {
             Text(item.type.displayName(), style = MaterialTheme.typography.labelSmall)
-            if (imageRequest != null) {
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = "${item.title} artwork",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
         }
     }
 }
+
+private fun logArtistArtworkLookupFailure(exception: Exception) {
+    if (Log.isLoggable(LIBRARY_ARTWORK_LOG_TAG, Log.DEBUG)) {
+        Log.d(
+            LIBRARY_ARTWORK_LOG_TAG,
+            "Artist artwork lookup failed (${exception.javaClass.simpleName})"
+        )
+    }
+}
+
+private const val LIBRARY_ARTWORK_LOG_TAG = "LmsArtwork"
 
 private fun LmsLibraryItem.canPlay(): Boolean = !isContainer && type in setOf(
     LmsLibraryItemType.ALBUM, LmsLibraryItemType.TRACK, LmsLibraryItemType.PLAYLIST
@@ -918,7 +1017,7 @@ private fun PlayerStrip(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                PlayerArtwork(mediaPlayer, Modifier.size(48.dp))
+                PlayerArtwork(mediaPlayer, activePlayer.connection, status, Modifier.size(48.dp))
                 Spacer(Modifier.width(10.dp))
                 Column(
                     modifier = Modifier
@@ -1056,26 +1155,29 @@ private fun PlayerStrip(
 }
 
 @Composable
-private fun PlayerArtwork(player: Player?, modifier: Modifier) {
-    val artworkUri = player?.currentMediaItem?.mediaMetadata?.artworkUri
+private fun PlayerArtwork(
+    player: Player?,
+    connection: LmsServerConnection,
+    status: LmsPlayerStatus?,
+    modifier: Modifier
+) {
+    val artworkUri = player?.currentMediaItem?.mediaMetadata?.artworkUri?.toString()
     Surface(
         modifier = modifier.clip(RoundedCornerShape(10.dp)),
         color = MaterialTheme.colorScheme.primaryContainer
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        LmsArtworkImage(
+            connection = connection,
+            artworkId = if (artworkUri == null) status?.artworkId else null,
+            artworkUrl = artworkUri ?: status?.artworkUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize()
+        ) {
             LibraryGlyphIcon(
                 LibraryGlyph.MUSIC,
                 MaterialTheme.colorScheme.onPrimaryContainer,
                 Modifier.size(24.dp)
             )
-            artworkUri?.let {
-                AsyncImage(
-                    model = it,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
         }
     }
 }
@@ -1286,31 +1388,6 @@ private fun LmsRepeatMode.displayName(): String = when (this) {
     LmsRepeatMode.TRACK -> "Track"
     LmsRepeatMode.PLAYLIST -> "Playlist"
 }
-
-private fun LmsServerConnection.artworkRequest(
-    context: android.content.Context,
-    item: LmsLibraryItem
-): ImageRequest? {
-    val serverUri = URI(jsonRpcUrl())
-    val targetUri = item.artworkUrl?.let { runCatching { URI(it) }.getOrNull() }
-        ?: item.artworkId
-            ?.takeIf { it.toLongOrNull() != null }
-            ?.let { serverUri.resolve("/music/$it/cover") }
-        ?: return null
-    val sameOrigin = serverUri.scheme.equals(targetUri.scheme, ignoreCase = true) &&
-        serverUri.host.equals(targetUri.host, ignoreCase = true) &&
-        serverUri.effectivePort() == targetUri.effectivePort()
-    val authorization = if (sameOrigin) basicAuthorizationHeader() else null
-    return ImageRequest.Builder(context)
-        .data(targetUri.toASCIIString())
-        .crossfade(true)
-        .apply {
-            authorization?.let { addHeader(HttpHeaders.Authorization, it) }
-        }
-        .build()
-}
-
-private fun URI.effectivePort(): Int = if (port != -1) port else if (scheme == "https") 443 else 80
 
 private fun formatDuration(seconds: Double): String {
     val totalSeconds = seconds.toInt().coerceAtLeast(0)

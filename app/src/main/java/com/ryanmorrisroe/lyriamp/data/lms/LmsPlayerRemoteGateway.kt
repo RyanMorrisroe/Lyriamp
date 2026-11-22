@@ -7,7 +7,9 @@ data class LmsPlayerStatus(
     val album: String?,
     val positionSeconds: Double,
     val durationSeconds: Double?,
-    val canSeek: Boolean
+    val canSeek: Boolean,
+    val artworkId: String? = null,
+    val artworkUrl: String? = null
 )
 
 data class LmsPlayerMixerState(

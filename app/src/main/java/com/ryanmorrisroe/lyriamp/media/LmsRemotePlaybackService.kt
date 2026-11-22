@@ -13,7 +13,12 @@ class LmsRemotePlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         val app = application as LyriampApplication
-        remotePlayer = LmsRemotePlayer(app.activePlayerStore, app.playerRemoteGateway)
+        remotePlayer = LmsRemotePlayer(
+            app.activePlayerStore,
+            app.playerRemoteGateway,
+            app,
+            app.artworkImageLoader
+        )
         mediaSession = MediaSession.Builder(this, remotePlayer).build()
     }
 

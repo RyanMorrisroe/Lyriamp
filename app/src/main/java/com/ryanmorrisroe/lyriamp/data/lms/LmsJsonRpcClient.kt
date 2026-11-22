@@ -178,6 +178,32 @@ class LmsJsonRpcClient(
         )
     }
 
+    override suspend fun getArtistArtworkUrl(
+        connection: LmsServerConnection,
+        artistId: String
+    ): String? {
+        if (artistId.toLongOrNull() == null) {
+            throw LmsProtocolException("LMS artist entry did not include a valid numeric ID.")
+        }
+        val result = request(connection, "-", artistArtworkCommand(artistId))
+        val artistPhotoUrl = (result["item_loop"] as? JsonArray)
+            ?.firstNotNullOfOrNull { photo ->
+                (photo as? JsonObject)?.get("url").asText()?.takeIf(String::isNotBlank)
+            }
+        artistPhotoUrl?.let { return it }
+
+        val firstAlbum = getPage(
+            connection,
+            LmsLibraryQuery.ALBUMS,
+            offset = 0,
+            limit = 1,
+            filter = LmsLibraryFilter(artistId = artistId)
+        ).items.firstOrNull() ?: return null
+
+        return firstAlbum.artworkUrl
+            ?: firstAlbum.artworkId?.let { "/music/$it/cover.jpg" }
+    }
+
     override suspend fun playNow(
         connection: LmsServerConnection,
         playerId: String,
@@ -203,6 +229,7 @@ class LmsJsonRpcClient(
             ?.firstOrNull() as? JsonObject
         val durationSeconds = currentTrack?.get("duration").asDouble()
             ?: result["duration"].asDouble()
+        val artwork = currentTrack?.artworkReference(arrayOf("coverid", "artwork_track_id", "artwork"))
         return LmsPlayerStatus(
             mode = when (result["mode"]?.jsonPrimitive?.contentOrNull) {
                 "play" -> LmsPlaybackMode.PLAYING
@@ -216,7 +243,9 @@ class LmsJsonRpcClient(
             album = currentTrack?.get("album").asText(),
             positionSeconds = result["time"].asDouble() ?: 0.0,
             durationSeconds = durationSeconds,
-            canSeek = result["can_seek"].asBoolean() ?: (durationSeconds != null)
+            canSeek = result["can_seek"].asBoolean() ?: (durationSeconds != null),
+            artworkId = artwork?.id,
+            artworkUrl = artwork?.url
         )
     }
 
@@ -321,7 +350,7 @@ class LmsJsonRpcClient(
         add(JsonPrimitive("status"))
         add(JsonPrimitive("-"))
         add(JsonPrimitive(1))
-        add(JsonPrimitive("tags:cgAB"))
+        add(JsonPrimitive("tags:cgABKJ"))
     }
 
     private fun mixerQueryCommand(control: String) = buildJsonArray {
@@ -347,11 +376,14 @@ class LmsJsonRpcClient(
         add(JsonPrimitive(offset))
         add(JsonPrimitive(limit))
         when (query) {
-            LmsLibraryQuery.ALBUMS -> add(JsonPrimitive("tags:laJK"))
+            LmsLibraryQuery.ALBUMS -> add(JsonPrimitive("tags:aljK"))
             LmsLibraryQuery.TRACKS,
-            LmsLibraryQuery.PLAYLIST_TRACKS -> add(JsonPrimitive("tags:galdeKc"))
-            LmsLibraryQuery.PLAYLISTS -> add(JsonPrimitive("tags:sux"))
-            LmsLibraryQuery.ARTISTS,
+            LmsLibraryQuery.PLAYLIST_TRACKS -> add(JsonPrimitive("tags:galdeKJc"))
+            LmsLibraryQuery.PLAYLISTS -> add(JsonPrimitive("tags:suxKJc"))
+            LmsLibraryQuery.ARTISTS -> {
+                add(JsonPrimitive("tags:4"))
+                add(JsonPrimitive("role_id:ALBUMARTIST"))
+            }
             LmsLibraryQuery.GENRES -> Unit
         }
         filter.toQueryParameters().forEach { add(JsonPrimitive(it)) }
@@ -364,6 +396,12 @@ class LmsJsonRpcClient(
         add(JsonPrimitive(limit))
         add(JsonPrimitive("term:$term"))
         add(JsonPrimitive("extended:1"))
+    }
+
+    private fun artistArtworkCommand(artistId: String) = buildJsonArray {
+        add(JsonPrimitive("musicartistinfo"))
+        add(JsonPrimitive("artistphotos"))
+        add(JsonPrimitive("artist_id:$artistId"))
     }
 
     private fun playlistControlCommand(action: String, filterName: String, id: String) = buildJsonArray {
@@ -461,24 +499,44 @@ class LmsJsonRpcClient(
         title: String,
         detectContainer: Boolean = false,
         artworkIdFields: Array<String> = arrayOf("artwork_track_id", "coverid", "artwork")
-    ) = LmsLibraryItem(
-        id = id,
-        type = type,
-        title = title,
-        artist = this["artist"].asText(),
-        album = this["album"].asText().takeUnless { type == LmsLibraryItemType.ALBUM },
-        durationSeconds = this["duration"].asDouble() ?: this["secs"].asDouble(),
-        artworkId = artworkIdFields.firstNotNullOfOrNull { key ->
-            this[key].asText()?.takeUnless { it.startsWith("http://") || it.startsWith("https://") }
-        },
-        artworkUrl = (listOf("artwork_url") + artworkIdFields.asList()).firstNotNullOfOrNull { key ->
-            this[key].asText()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-        },
-        isContainer = detectContainer && (
-            this["type"].asText() == "folder" ||
-                id.startsWith("file:", ignoreCase = true) || '/' in id || '\\' in id
-            )
-    )
+    ): LmsLibraryItem {
+        val artwork = if (type == LmsLibraryItemType.ARTIST) {
+            val portraitId = this["portraitid"].asText()?.takeIf(String::isLmsArtworkId)
+            portraitId?.let {
+                LmsArtworkReference(null, "/contributor/$it/image")
+            } ?: artworkReference(artworkIdFields)
+        } else {
+            artworkReference(artworkIdFields)
+        }
+        return LmsLibraryItem(
+            id = id,
+            type = type,
+            title = title,
+            artist = this["artist"].asText(),
+            album = this["album"].asText().takeUnless { type == LmsLibraryItemType.ALBUM },
+            durationSeconds = this["duration"].asDouble() ?: this["secs"].asDouble(),
+            artworkId = artwork?.id,
+            artworkUrl = artwork?.url,
+            isContainer = detectContainer && (
+                this["type"].asText() == "folder" ||
+                    id.startsWith("file:", ignoreCase = true) || '/' in id || '\\' in id
+                )
+        )
+    }
+
+    private fun JsonObject.artworkReference(artworkIdFields: Array<String>): LmsArtworkReference? {
+        val values = artworkIdFields.mapNotNull { key ->
+            this[key].asText()?.takeIf(String::isNotBlank)
+        }
+        val explicitUrl = this["artwork_url"].asText()?.takeIf(String::isNotBlank)
+        val url = explicitUrl ?: values.firstOrNull { value ->
+            value.startsWith("http://", ignoreCase = true) ||
+                value.startsWith("https://", ignoreCase = true) ||
+                '/' in value || '?' in value
+        }
+        val id = values.firstOrNull { it.isLmsArtworkId() }
+        return if (id == null && url == null) null else LmsArtworkReference(id, url)
+    }
 
     private fun LmsLibraryFilter.toQueryParameters(): List<String> = buildList {
         artistId?.takeIf(String::isNotBlank)?.let { add("artist_id:$it") }
@@ -490,6 +548,8 @@ class LmsJsonRpcClient(
 
     private fun JsonElement?.asText(): String? =
         (this as? JsonPrimitive)?.contentOrNull
+
+    private data class LmsArtworkReference(val id: String?, val url: String?)
 
     private companion object {
         const val MAX_LIBRARY_PAGE_SIZE = 100
