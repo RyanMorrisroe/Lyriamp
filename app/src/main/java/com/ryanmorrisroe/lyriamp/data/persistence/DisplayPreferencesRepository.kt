@@ -19,7 +19,7 @@ enum class LibraryLayout { COVER_WALL, COMPACT, COMFORTABLE }
 enum class LibraryViewType(val allowsCoverWall: Boolean) {
     ARTISTS(true),
     ALBUMS(true),
-    GENRES(true),
+    GENRES(false),
     SONGS(false),
     PLAYLISTS(false),
     SEARCH(false)

@@ -29,19 +29,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.Player
-import coil.compose.AsyncImage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
 import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
+import com.ryanmorrisroe.lyriamp.ui.artwork.LmsArtworkImage
 import kotlinx.coroutines.delay
 
 @Composable
@@ -77,7 +76,7 @@ fun NowPlayingScreen(
         ?: "Nothing playing"
     val artist = metadata?.artist?.toString()?.takeIf(String::isNotBlank) ?: status?.artist
     val album = metadata?.albumTitle?.toString()?.takeIf(String::isNotBlank) ?: status?.album
-    val artworkUri = metadata?.artworkUri
+    val artworkUri = metadata?.artworkUri?.toString()
 
     Scaffold(
         topBar = {
@@ -102,14 +101,13 @@ fun NowPlayingScreen(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = MaterialTheme.shapes.medium
             ) {
-                if (artworkUri != null) {
-                    AsyncImage(
-                        model = artworkUri,
-                        contentDescription = "Album artwork",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
+                LmsArtworkImage(
+                    connection = connectionState.activeConnection,
+                    artworkId = if (artworkUri == null) status?.artworkId else null,
+                    artworkUrl = artworkUri ?: status?.artworkUrl,
+                    contentDescription = "Album artwork",
+                    modifier = Modifier.fillMaxSize()
+                ) {
                     Text(
                         text = title.take(1).uppercase(),
                         modifier = Modifier.fillMaxSize().padding(24.dp),
