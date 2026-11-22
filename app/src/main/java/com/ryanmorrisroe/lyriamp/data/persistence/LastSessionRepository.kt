@@ -32,6 +32,14 @@ data class LastSessionSnapshot(
     val playerId: String,
     val locationStack: List<LastSessionLocation>,
     val searchText: String,
+    val scrollAnchor: LastSessionScrollAnchor? = null,
+    val activeTab: String? = null,
+    val lastVisitedTab: String? = null,
+    val tabs: Map<String, LastSessionTabSnapshot> = emptyMap()
+)
+
+data class LastSessionTabSnapshot(
+    val locationStack: List<LastSessionLocation>,
     val scrollAnchor: LastSessionScrollAnchor? = null
 )
 
@@ -70,29 +78,40 @@ class DataStoreLastSessionRepository(
         put("serverProfileId", snapshot.serverProfileId)
         put("playerId", snapshot.playerId)
         put("searchText", snapshot.searchText)
-        put("locations", buildJsonArray {
-            snapshot.locationStack.forEach { location ->
-                add(buildJsonObject {
-                    put("title", location.title)
-                    location.query?.let { put("query", it.name) }
-                    location.filter.artistId?.let { put("artistId", it) }
-                    location.filter.albumId?.let { put("albumId", it) }
-                    location.filter.genreId?.let { put("genreId", it) }
-                    location.filter.playlistId?.let { put("playlistId", it) }
-                    location.filter.folderId?.let { put("folderId", it) }
+        put("locations", encodeLocations(snapshot.locationStack))
+        snapshot.scrollAnchor?.let { put("scrollAnchor", encodeAnchor(it)) }
+        snapshot.activeTab?.let { put("activeTab", it) }
+        snapshot.lastVisitedTab?.let { put("lastVisitedTab", it) }
+        put("tabs", buildJsonObject {
+            snapshot.tabs.forEach { (tab, state) ->
+                put(tab, buildJsonObject {
+                    put("locations", encodeLocations(state.locationStack))
+                    state.scrollAnchor?.let { put("scrollAnchor", encodeAnchor(it)) }
                 })
             }
         })
-        snapshot.scrollAnchor?.let { anchor ->
-            put("scrollAnchor", buildJsonObject {
-                put("locationKey", anchor.locationKey)
-                put("searchText", anchor.searchText)
-                if (anchor.itemId == null) put("itemId", JsonNull)
-                else put("itemId", anchor.itemId)
-                put("index", anchor.index)
-                put("offsetPx", anchor.offsetPx)
+    }
+
+    private fun encodeLocations(locations: List<LastSessionLocation>) = buildJsonArray {
+        locations.forEach { location ->
+            add(buildJsonObject {
+                put("title", location.title)
+                location.query?.let { put("query", it.name) }
+                location.filter.artistId?.let { put("artistId", it) }
+                location.filter.albumId?.let { put("albumId", it) }
+                location.filter.genreId?.let { put("genreId", it) }
+                location.filter.playlistId?.let { put("playlistId", it) }
+                location.filter.folderId?.let { put("folderId", it) }
             })
         }
+    }
+
+    private fun encodeAnchor(anchor: LastSessionScrollAnchor) = buildJsonObject {
+        put("locationKey", anchor.locationKey)
+        put("searchText", anchor.searchText)
+        if (anchor.itemId == null) put("itemId", JsonNull) else put("itemId", anchor.itemId)
+        put("index", anchor.index)
+        put("offsetPx", anchor.offsetPx)
     }
 
     private fun decode(serialized: String): LastSessionSnapshot? = runCatching {
@@ -100,7 +119,29 @@ class DataStoreLastSessionRepository(
         require(root.int("version") == VERSION)
         val serverProfileId = requireNotNull(root.string("serverProfileId"))
         val playerId = requireNotNull(root.string("playerId"))
-        val locations = root["locations"]!!.jsonArray.map { element ->
+        val locations = decodeLocations(root["locations"]!!.jsonArray)
+        val scroll = decodeAnchor(root["scrollAnchor"])
+        val tabs = root["tabs"]?.jsonObject?.mapValues { (_, element) ->
+            val tab = element.jsonObject
+            LastSessionTabSnapshot(
+                locationStack = decodeLocations(tab["locations"]!!.jsonArray),
+                scrollAnchor = decodeAnchor(tab["scrollAnchor"])
+            )
+        }.orEmpty()
+        LastSessionSnapshot(
+            serverProfileId = serverProfileId,
+            playerId = playerId,
+            locationStack = locations,
+            searchText = root.string("searchText").orEmpty(),
+            scrollAnchor = scroll,
+            activeTab = root.string("activeTab"),
+            lastVisitedTab = root.string("lastVisitedTab"),
+            tabs = tabs
+        )
+    }.getOrNull()
+
+    private fun decodeLocations(locations: JsonArray): List<LastSessionLocation> =
+        locations.map { element ->
             val value = element.jsonObject
             LastSessionLocation(
                 title = requireNotNull(value.string("title")),
@@ -114,7 +155,9 @@ class DataStoreLastSessionRepository(
                 )
             )
         }
-        val scroll = root["scrollAnchor"]?.takeUnless { it == JsonNull }?.jsonObject?.let { value ->
+
+    private fun decodeAnchor(element: kotlinx.serialization.json.JsonElement?): LastSessionScrollAnchor? =
+        element?.takeUnless { it == JsonNull }?.jsonObject?.let { value ->
             LastSessionScrollAnchor(
                 locationKey = requireNotNull(value.string("locationKey")),
                 searchText = value.string("searchText").orEmpty(),
@@ -123,14 +166,6 @@ class DataStoreLastSessionRepository(
                 offsetPx = value.int("offsetPx")?.coerceAtLeast(0) ?: 0
             )
         }
-        LastSessionSnapshot(
-            serverProfileId = serverProfileId,
-            playerId = playerId,
-            locationStack = locations,
-            searchText = root.string("searchText").orEmpty(),
-            scrollAnchor = scroll
-        )
-    }.getOrNull()
 
     private fun JsonObject.string(key: String): String? =
         this[key]?.takeUnless { it == JsonNull }?.jsonPrimitive?.contentOrNull

@@ -3,6 +3,8 @@ package com.ryanmorrisroe.lyriamp.data.persistence
 import androidx.datastore.core.DataStoreFactory
 import androidx.datastore.core.okio.OkioStorage
 import androidx.datastore.preferences.core.PreferencesSerializer
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import java.nio.file.Files
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +61,17 @@ class LastSessionRepositoryTest {
                     itemId = "track-49",
                     index = 49,
                     offsetPx = 23
+                ),
+                activeTab = "ARTISTS",
+                lastVisitedTab = "ARTISTS",
+                tabs = mapOf(
+                    "ARTISTS" to LastSessionTabSnapshot(
+                        listOf(
+                            LastSessionLocation("Library"),
+                            LastSessionLocation("Artists", LmsLibraryQuery.ARTISTS)
+                        ),
+                        LastSessionScrollAnchor("artist-key", "", "artist-42", 42, 4)
+                    )
                 )
             )
 
@@ -67,6 +80,23 @@ class LastSessionRepositoryTest {
             assertEquals(snapshot, repository.load())
             repository.clear()
             assertNull(repository.load())
+
+            dataStore.edit {
+                it[stringPreferencesKey("last_session_snapshot")] =
+                    """{"version":1,"serverProfileId":"old-server","playerId":"old-player","searchText":"","locations":[{"title":"Library"},{"title":"Albums","query":"ALBUMS"}]}"""
+            }
+            assertEquals(
+                LastSessionSnapshot(
+                    serverProfileId = "old-server",
+                    playerId = "old-player",
+                    locationStack = listOf(
+                        LastSessionLocation("Library"),
+                        LastSessionLocation("Albums", LmsLibraryQuery.ALBUMS)
+                    ),
+                    searchText = ""
+                ),
+                repository.load()
+            )
         } finally {
             dataStoreScope.cancel()
             directory.deleteRecursively()

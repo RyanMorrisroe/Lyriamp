@@ -76,6 +76,7 @@ class ConnectionViewModelTest {
 
             assertTrue(viewModel.uiState.value.savedServers.isEmpty())
             assertNull(savedServerRepository.getConnection(savedProfile.id))
+            assertNull(viewModel.uiState.value.serverProfileId)
         }
     }
 

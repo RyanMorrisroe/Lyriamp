@@ -43,18 +43,41 @@ import com.ryanmorrisroe.lyriamp.feature.library.LibraryLocation
 import com.ryanmorrisroe.lyriamp.feature.library.LibraryViewModel
 import com.ryanmorrisroe.lyriamp.feature.library.libraryLocationKey
 import com.ryanmorrisroe.lyriamp.feature.player.NowPlayingScreen
+import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
+import com.ryanmorrisroe.lyriamp.feature.settings.SettingsScreen
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 
 @Composable
 fun LyriampAppNavigation(
     connectionViewModel: ConnectionViewModel,
     libraryViewModel: LibraryViewModel,
+    displayPreferencesViewModel: DisplayPreferencesViewModel,
     mediaPlayer: Player?,
     lastSessionRepository: LastSessionRepository
 ) {
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
     var pendingRestore by remember { mutableStateOf<LastSessionSnapshot?>(null) }
+    val sessionSaves = remember { Channel<LastSessionSnapshot>(Channel.CONFLATED) }
+    var sessionSaveError by remember { mutableStateOf<String?>(null) }
+    var failedSnapshot by remember { mutableStateOf<LastSessionSnapshot?>(null) }
+
+    LaunchedEffect(lastSessionRepository) {
+        for (snapshot in sessionSaves) {
+            try {
+                lastSessionRepository.save(snapshot)
+                sessionSaveError = null
+                failedSnapshot = null
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                failedSnapshot = snapshot
+                sessionSaveError = "Could not save your library position: ${exception.message}"
+            }
+        }
+    }
 
     fun openConnections() {
         navController.navigate(CONNECTIONS_ROUTE) {
@@ -76,7 +99,10 @@ fun LyriampAppNavigation(
                 LibraryLocation(location.title, location.query, location.filter)
             },
             searchText = snapshot.searchText,
-            scrollAnchor = snapshot.scrollAnchor
+            scrollAnchor = snapshot.scrollAnchor,
+            activeTab = snapshot.activeTab,
+            lastVisitedTab = snapshot.lastVisitedTab,
+            tabs = snapshot.tabs
         )
     }
 
@@ -135,7 +161,13 @@ fun LyriampAppNavigation(
                         }
                         connectionViewModel.removeSavedServer(profileId)
                     }
-                }
+                },
+                onBack = if (navController.previousBackStackEntry != null) {
+                    {
+                        if (libraryViewModel.uiState.value.activePlayer == null) openConnections()
+                        else navController.popBackStack()
+                    }
+                } else null
             )
         }
         composable(
@@ -201,12 +233,17 @@ fun LyriampAppNavigation(
                 onChangePlayer = {
                     navController.navigate("$PLAYER_SELECTION_ROUTE?origin=library")
                 },
-                onChangeServer = ::openConnections,
+                displayPreferencesViewModel = displayPreferencesViewModel,
+                onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
                 onOpenNowPlaying = { navController.navigate(NOW_PLAYING_ROUTE) },
+                sessionError = sessionSaveError,
+                onRetrySessionSave = { failedSnapshot?.let { sessionSaves.trySend(it) } },
                 onLibraryStateChanged = { locations, searchText, anchor ->
                     val player = libraryViewModel.uiState.value.activePlayer
                     val profileId = connectionViewModel.uiState.value.serverProfileId
-                    if (player != null && profileId != null) {
+                    if (player != null && profileId != null &&
+                        libraryViewModel.isCurrentLocation(locations, searchText)
+                    ) {
                         val snapshot = LastSessionSnapshot(
                             serverProfileId = profileId,
                             playerId = player.playerId,
@@ -217,11 +254,24 @@ fun LyriampAppNavigation(
                             scrollAnchor = anchor?.takeIf {
                                 it.locationKey == libraryLocationKey(locations) &&
                                     it.searchText == searchText
-                            }
+                            },
+                            activeTab = libraryViewModel.currentTab().name,
+                            lastVisitedTab = libraryViewModel.lastVisitedTab()?.name,
+                            tabs = libraryViewModel.savedTabs()
                         )
-                        scope.launch { lastSessionRepository.save(snapshot) }
+                        if (sessionSaves.trySend(snapshot).isFailure) {
+                            failedSnapshot = snapshot
+                            sessionSaveError = "Could not queue your library position for saving."
+                        }
                     }
                 }
+            )
+        }
+        composable(SETTINGS_ROUTE) {
+            SettingsScreen(
+                viewModel = displayPreferencesViewModel,
+                onBack = { navController.popBackStack() },
+                onConnections = { navController.navigate(CONNECTIONS_ROUTE) }
             )
         }
         composable(NOW_PLAYING_ROUTE) {
@@ -243,6 +293,7 @@ private const val SERVER_SETUP_ROUTE = "server-setup"
 private const val PLAYER_SELECTION_ROUTE = "player-selection"
 private const val LIBRARY_ROUTE = "library"
 private const val NOW_PLAYING_ROUTE = "now-playing"
+private const val SETTINGS_ROUTE = "settings"
 private const val PROFILE_ID_ARGUMENT = "profileId"
 private const val ORIGIN_ARGUMENT = "origin"
 

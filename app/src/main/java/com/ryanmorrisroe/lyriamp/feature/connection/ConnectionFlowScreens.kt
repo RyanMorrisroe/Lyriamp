@@ -54,11 +54,19 @@ fun ConnectionsScreen(
     viewModel: ConnectionViewModel,
     onAddServer: () -> Unit,
     onConnectSavedServer: (String) -> Unit,
-    onRemoveSavedServer: (String) -> Unit
+    onRemoveSavedServer: (String) -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Connections") }) }
+        topBar = {
+            TopAppBar(
+                title = { Text("Connections") },
+                navigationIcon = {
+                    if (onBack != null) TextButton(onClick = onBack) { Text("Back") }
+                }
+            )
+        }
     ) { contentPadding ->
         Column(
             modifier = Modifier

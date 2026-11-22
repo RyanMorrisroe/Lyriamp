@@ -237,7 +237,12 @@ class ConnectionViewModel(
         viewModelScope.launch {
             try {
                 repository.remove(id)
-                mutableUiState.update { it.copy(removingSavedServerId = null) }
+                mutableUiState.update {
+                    it.copy(
+                        removingSavedServerId = null,
+                        serverProfileId = it.serverProfileId?.takeUnless { profileId -> profileId == id }
+                    )
+                }
             } catch (exception: CancellationException) {
                 throw exception
             } catch (_: Exception) {
