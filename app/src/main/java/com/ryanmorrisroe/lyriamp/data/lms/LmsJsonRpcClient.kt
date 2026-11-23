@@ -236,21 +236,11 @@ class LmsJsonRpcClient(
         item: LmsLibraryItem
     ) {
         require(!item.isContainer) { "A playlist folder cannot be played." }
-        val filterName = when (item.type) {
-            LmsLibraryItemType.TRACK -> "track_id"
-            LmsLibraryItemType.ALBUM -> "album_id"
-            LmsLibraryItemType.PLAYLIST -> "playlist_id"
-            LmsLibraryItemType.ARTIST -> "artist_id"
-            LmsLibraryItemType.GENRE -> "genre_id"
-        }
-        val sort = if (item.type == LmsLibraryItemType.ARTIST ||
-            item.type == LmsLibraryItemType.GENRE
-        ) {
-            "album"
-        } else {
-            null
-        }
-        request(connection, playerId, playlistControlCommand("load", filterName, item.id, sort))
+        request(
+            connection,
+            playerId,
+            playlistControlCommand("load", item.playlistControlFilterName(), item.id, item.playlistControlSort())
+        )
     }
 
     override suspend fun getPlayerStatus(
@@ -278,7 +268,103 @@ class LmsJsonRpcClient(
             durationSeconds = durationSeconds,
             canSeek = result["can_seek"].asBoolean() ?: (durationSeconds != null),
             artworkId = artwork?.id,
-            artworkUrl = artwork?.url
+            artworkUrl = artwork?.url,
+            playlistIndex = result["playlist_cur_index"].asInt()
+                ?: currentTrack?.get("playlist index").asInt(),
+            trackId = currentTrack?.get("id").asText()
+        )
+    }
+
+    override suspend fun getPlayerQueue(
+        connection: LmsServerConnection,
+        playerId: String,
+        offset: Int,
+        limit: Int
+    ): LmsPlayerQueuePage {
+        validateQueuePage(offset, limit)
+        val result = request(connection, playerId, playerQueueCommand(offset, limit))
+        val totalCount = result["playlist_tracks"].asInt()
+            ?: throw LmsProtocolException("LMS response did not include the queue size.")
+        if (totalCount < 0) {
+            throw LmsProtocolException("LMS returned an invalid queue size.")
+        }
+        val currentIndex = result["playlist_cur_index"].asInt()
+            ?.takeIf { it in 0 until totalCount }
+        val playlist = result["playlist_loop"] as? JsonArray
+        val entries = when {
+            playlist != null -> playlist
+            totalCount == 0 || offset >= totalCount -> JsonArray(emptyList())
+            else -> throw LmsProtocolException("LMS response did not include the queue items.")
+        }
+        if (entries.isEmpty() && offset < totalCount) {
+            throw LmsProtocolException("LMS returned no queue items for a non-empty queue page.")
+        }
+        val items = entries.map { item ->
+            val entry = item as? JsonObject
+                ?: throw LmsProtocolException("LMS returned an invalid queue entry.")
+            val index = entry["playlist index"].asInt()
+                ?: throw LmsProtocolException("LMS queue entry did not include its playlist index.")
+            val title = entry["title"].asText()
+                ?: throw LmsProtocolException("LMS queue entry did not include a title.")
+            val artwork = entry.artworkReference(arrayOf("coverid", "artwork_track_id", "artwork"))
+            LmsQueueItem(
+                index = index,
+                trackId = entry["id"].asText(),
+                title = title,
+                artist = entry["artist"].asText(),
+                album = entry["album"].asText(),
+                durationSeconds = entry["duration"].asDouble(),
+                artworkId = artwork?.id,
+                artworkUrl = artwork?.url
+            )
+        }
+        return LmsPlayerQueuePage(items, offset, totalCount, currentIndex)
+    }
+
+    override suspend fun addQueueItem(
+        connection: LmsServerConnection,
+        playerId: String,
+        item: LmsLibraryItem,
+        position: LmsQueueAddPosition
+    ) {
+        require(!item.isContainer) { "A playlist folder cannot be added to the queue." }
+        val action = when (position) {
+            LmsQueueAddPosition.END -> "add"
+            LmsQueueAddPosition.NEXT -> "insert"
+        }
+        request(
+            connection,
+            playerId,
+            playlistControlCommand(action, item.playlistControlFilterName(), item.id, item.playlistControlSort())
+        )
+    }
+
+    override suspend fun removeQueueItem(
+        connection: LmsServerConnection,
+        playerId: String,
+        index: Int
+    ) {
+        require(index >= 0) { "Queue index cannot be negative." }
+        request(connection, playerId, playlistItemCommand("delete", index))
+    }
+
+    override suspend fun moveQueueItem(
+        connection: LmsServerConnection,
+        playerId: String,
+        fromIndex: Int,
+        toIndex: Int
+    ) {
+        require(fromIndex >= 0) { "Queue index cannot be negative." }
+        require(toIndex >= 0) { "Queue index cannot be negative." }
+        request(
+            connection,
+            playerId,
+            buildJsonArray {
+                add(JsonPrimitive("playlist"))
+                add(JsonPrimitive("move"))
+                add(JsonPrimitive(fromIndex))
+                add(JsonPrimitive(toIndex))
+            }
         )
     }
 
@@ -383,7 +469,20 @@ class LmsJsonRpcClient(
         add(JsonPrimitive("status"))
         add(JsonPrimitive("-"))
         add(JsonPrimitive(1))
-        add(JsonPrimitive("tags:cgABKJ"))
+        add(JsonPrimitive(PLAYER_TRACK_TAGS))
+    }
+
+    private fun playerQueueCommand(offset: Int, limit: Int) = buildJsonArray {
+        add(JsonPrimitive("status"))
+        add(JsonPrimitive(offset))
+        add(JsonPrimitive(limit))
+        add(JsonPrimitive(PLAYER_TRACK_TAGS))
+    }
+
+    private fun playlistItemCommand(command: String, index: Int) = buildJsonArray {
+        add(JsonPrimitive("playlist"))
+        add(JsonPrimitive(command))
+        add(JsonPrimitive(index))
     }
 
     private fun mixerQueryCommand(control: String) = buildJsonArray {
@@ -447,6 +546,13 @@ class LmsJsonRpcClient(
         add(JsonPrimitive("cmd:$action"))
         add(JsonPrimitive("$filterName:$id"))
         sort?.let { add(JsonPrimitive("sort:$it")) }
+    }
+
+    private fun validateQueuePage(offset: Int, limit: Int) {
+        require(offset >= 0) { "Queue result offset cannot be negative." }
+        require(limit in 1..MAX_QUEUE_PAGE_SIZE) {
+            "Queue page size must be between 1 and $MAX_QUEUE_PAGE_SIZE."
+        }
     }
 
     private fun validateLibraryPage(offset: Int, limit: Int) {
@@ -586,6 +692,19 @@ class LmsJsonRpcClient(
         folderId?.takeIf(String::isNotBlank)?.let { add("folder_id:$it") }
     }
 
+    private fun LmsLibraryItem.playlistControlFilterName(): String = when (type) {
+        LmsLibraryItemType.TRACK -> "track_id"
+        LmsLibraryItemType.ALBUM -> "album_id"
+        LmsLibraryItemType.PLAYLIST -> "playlist_id"
+        LmsLibraryItemType.ARTIST -> "artist_id"
+        LmsLibraryItemType.GENRE -> "genre_id"
+    }
+
+    private fun LmsLibraryItem.playlistControlSort(): String? = when (type) {
+        LmsLibraryItemType.ARTIST, LmsLibraryItemType.GENRE -> "album"
+        else -> null
+    }
+
     private fun JsonElement?.asText(): String? =
         (this as? JsonPrimitive)?.contentOrNull
 
@@ -593,6 +712,8 @@ class LmsJsonRpcClient(
 
     private companion object {
         const val MAX_LIBRARY_PAGE_SIZE = 100
+        const val MAX_QUEUE_PAGE_SIZE = 100
+        const val PLAYER_TRACK_TAGS = "tags:aclKN"
     }
 
     private fun JsonElement.asMessage(): String =

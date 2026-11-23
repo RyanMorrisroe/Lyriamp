@@ -4,6 +4,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.mutableStateOf
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayer
@@ -31,8 +33,10 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerDirectory
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerMixerState
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerPlaybackOptions
+import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerQueuePage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerRemoteGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
+import com.ryanmorrisroe.lyriamp.data.lms.LmsQueueAddPosition
 import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerInfo
@@ -188,6 +192,69 @@ class LibraryLayoutTest {
     }
 
     @Test
+    fun playTapRemainsImmediateAndLongPressOffersQueueActions() {
+        val store = LmsActivePlayerStore().apply {
+            select(LmsActivePlayer(LmsServerConnection("localhost"), "player", "Living room"))
+        }
+        val queueAdds = CopyOnWriteArrayList<Pair<LmsLibraryItem, LmsQueueAddPosition>>()
+        val connection = connectedPlayer(store, AtomicInteger(), queueAdds)
+        val gateway = showLibrary(FakeDisplayPreferences(), store, connection)
+
+        compose.onAllNodesWithText("Songs").onFirst().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Song 0").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Play Song 0").performClick()
+        compose.waitUntil(10_000) { gateway.playedItems.isNotEmpty() }
+        compose.runOnIdle {
+            assertEquals("Song 0", gateway.playedItems.last().title)
+            assertTrue(queueAdds.isEmpty())
+        }
+
+        compose.onNodeWithContentDescription("Play Song 0").performTouchInput {
+            down(center)
+            advanceEventTime(700)
+            up()
+        }
+        compose.onNodeWithText("Add to end").performClick()
+        compose.waitUntil(10_000) { queueAdds.size == 1 }
+        compose.runOnIdle {
+            assertEquals("Song 0", queueAdds.single().first.title)
+            assertEquals(LmsQueueAddPosition.END, queueAdds.single().second)
+            assertEquals(1, gateway.playedItems.size)
+        }
+    }
+
+    @Test
+    fun queuePickerAddsItemsWithoutLeavingTheLibrary() {
+        val store = LmsActivePlayerStore().apply {
+            select(LmsActivePlayer(LmsServerConnection("localhost"), "player", "Living room"))
+        }
+        val queueAdds = CopyOnWriteArrayList<Pair<LmsLibraryItem, LmsQueueAddPosition>>()
+        val connection = connectedPlayer(store, AtomicInteger(), queueAdds)
+        showLibrary(
+            FakeDisplayPreferences(),
+            store,
+            connection,
+            queuePickerMode = true
+        )
+
+        compose.onAllNodesWithText("Songs").onFirst().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("Add Song 0 to queue")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Add Song 0 to queue").performClick()
+        compose.waitUntil(10_000) { queueAdds.size == 1 }
+
+        compose.onNodeWithText("Add to queue").fetchSemanticsNode()
+        compose.runOnIdle {
+            assertEquals("Song 0", queueAdds.single().first.title)
+            assertEquals(LmsQueueAddPosition.END, queueAdds.single().second)
+        }
+    }
+
+    @Test
     fun albumRowsKeepYearWhenOpenedFromAnArtist() {
         showLibrary(FakeDisplayPreferences())
 
@@ -301,7 +368,8 @@ class LibraryLayoutTest {
             val client = LmsJsonRpcClient(httpClient)
             ConnectionViewModel(client, client, client, store)
         },
-        searchText: String = ""
+        searchText: String = "",
+        queuePickerMode: Boolean = false
     ): FakeLibrary {
         val gateway = FakeLibrary()
         val library = LibraryViewModel(gateway, store)
@@ -316,7 +384,8 @@ class LibraryLayoutTest {
                     mediaPlayer = null,
                     onChangePlayer = {},
                     onOpenSettings = {},
-                    onOpenNowPlaying = {}
+                    onOpenNowPlaying = {},
+                    queuePickerMode = queuePickerMode
                 )
             }
         }
@@ -325,7 +394,8 @@ class LibraryLayoutTest {
 
     private fun connectedPlayer(
         store: LmsActivePlayerStore,
-        statusReads: AtomicInteger
+        statusReads: AtomicInteger,
+        queueAdds: MutableList<Pair<LmsLibraryItem, LmsQueueAddPosition>> = mutableListOf()
     ): ConnectionViewModel {
         val directory = object : LmsConnectionGateway, LmsPlayerDirectory {
             override suspend fun testConnection(connection: LmsServerConnection) =
@@ -345,6 +415,35 @@ class LibraryLayoutTest {
                     durationSeconds = 120.0,
                     canSeek = true
                 )
+
+            override suspend fun getPlayerQueue(
+                connection: LmsServerConnection,
+                playerId: String,
+                offset: Int,
+                limit: Int
+            ) = LmsPlayerQueuePage(emptyList(), offset, 0, null)
+
+            override suspend fun addQueueItem(
+                connection: LmsServerConnection,
+                playerId: String,
+                item: LmsLibraryItem,
+                position: LmsQueueAddPosition
+            ) {
+                queueAdds += item to position
+            }
+
+            override suspend fun removeQueueItem(
+                connection: LmsServerConnection,
+                playerId: String,
+                index: Int
+            ) = Unit
+
+            override suspend fun moveQueueItem(
+                connection: LmsServerConnection,
+                playerId: String,
+                fromIndex: Int,
+                toIndex: Int
+            ) = Unit
 
             override suspend fun getPlayerMixerState(connection: LmsServerConnection, playerId: String) =
                 LmsPlayerMixerState(50, false)
@@ -383,6 +482,7 @@ class LibraryLayoutTest {
     private class FakeLibrary : LmsLibraryGateway {
         val requests = CopyOnWriteArrayList<Pair<LmsLibraryQuery, Int>>()
         val artistArtworkRequests = AtomicInteger()
+        val playedItems = CopyOnWriteArrayList<LmsLibraryItem>()
 
         override suspend fun getPage(
             connection: LmsServerConnection,
@@ -491,6 +591,8 @@ class LibraryLayoutTest {
             return null
         }
 
-        override suspend fun playNow(connection: LmsServerConnection, playerId: String, item: LmsLibraryItem) = Unit
+        override suspend fun playNow(connection: LmsServerConnection, playerId: String, item: LmsLibraryItem) {
+            playedItems += item
+        }
     }
 }

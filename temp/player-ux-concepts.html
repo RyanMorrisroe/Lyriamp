@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lyriamp — player UX concepts</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #101015;
+      color: #f7f4f4;
+      --muted: #aaa4ad;
+      --line: #39343d;
+      --accent: #e6b487;
+      --accent-strong: #f2c99e;
+      --screen: #19171c;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .page { max-width: 1540px; margin: auto; padding: 48px 32px 76px; }
+    .eyebrow { color: var(--accent); font-size: 11px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 10px 0 12px; font-size: clamp(32px, 4vw, 52px); letter-spacing: -.05em; }
+    .intro { max-width: 790px; margin: 0; color: #aca8b1; line-height: 1.65; }
+    .note { display: inline-flex; align-items: center; gap: 9px; margin: 18px 0 32px; padding: 10px 13px; border: 1px solid #39343a; border-radius: 9px; color: #c9c2c3; font-size: 12px; }
+    .note::before { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); content: ""; }
+    .concepts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; align-items: start; }
+    .concept { min-width: 0; }
+    .concept-label { display: flex; align-items: baseline; gap: 10px; margin: 0 0 9px; }
+    .concept-label span { color: var(--accent); font-size: 12px; font-weight: 750; letter-spacing: .08em; }
+    .concept-label h2 { margin: 0; font-size: 20px; letter-spacing: -.035em; }
+    .description { min-height: 60px; margin: 0 0 17px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .phone { position: relative; width: 100%; max-width: 390px; height: 820px; margin: 0 auto; overflow: hidden; border: 1px solid #514951; border-radius: 34px; background: var(--screen); box-shadow: 0 20px 55px #0007, inset 0 0 0 4px #211e24; }
+    .status { height: 43px; display: flex; justify-content: space-between; align-items: end; padding: 0 23px 7px; font-size: 11px; font-weight: 700; }
+    .status-icons { color: #e8ddd7; letter-spacing: 3px; }
+    .screen { height: calc(100% - 43px); overflow-y: auto; padding: 0 20px 18px; scrollbar-width: none; }
+    .screen::-webkit-scrollbar { display: none; }
+    .top { height: 48px; display: flex; justify-content: space-between; align-items: center; }
+    .top-title { display: flex; align-items: center; gap: 10px; color: #d3cbd0; font-size: 11px; font-weight: 750; letter-spacing: .11em; }
+    .top-title .chevron { color: var(--accent); font-size: 21px; line-height: 1; }
+    .player-pill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid #49414a; border-radius: 999px; color: #e4d8d8; font-size: 10px; font-weight: 650; }
+    .player-pill::before { width: 6px; height: 6px; border-radius: 50%; background: #8fc19b; content: ""; }
+    .more { color: #cfc4c8; font-size: 20px; line-height: 1; }
+    .art { position: relative; overflow: hidden; background: #463944; isolation: isolate; }
+    .art::before, .art::after { position: absolute; z-index: -1; content: ""; }
+    .art::before { inset: 0; background:
+      radial-gradient(ellipse at 68% 30%, #e8bf9a 0 9%, transparent 9.5%),
+      radial-gradient(ellipse at 64% 38%, #b07768 0 21%, transparent 21.5%),
+      linear-gradient(145deg, #d7a47a 0 25%, #945e5b 26% 48%, #423c4a 49% 70%, #222b35 100%); }
+    .art::after { inset: 12%; border: 1px solid #ffffff3d; transform: rotate(-8deg); }
+    .art-label { position: absolute; right: 10%; bottom: 10%; left: 10%; color: #fff9; font-family: Georgia, serif; font-size: 13px; letter-spacing: .2em; text-align: center; }
+    .art.alt::before { background:
+      radial-gradient(circle at 50% 37%, #eed6aa 0 10%, transparent 10.5%),
+      radial-gradient(ellipse at 50% 62%, #b68b73 0 24%, transparent 24.5%),
+      linear-gradient(135deg, #4b7479, #253f4c 58%, #1b2935); }
+    .art.alt::after { inset: 16% 23%; border-radius: 50%; transform: none; }
+    .art.alt .art-label { color: #ffffffb8; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 10px; letter-spacing: .3em; }
+    .art.earth::before { background:
+      radial-gradient(ellipse at 54% 36%, #edc49f 0 10%, transparent 10.5%),
+      linear-gradient(30deg, #292d31 0 23%, #687368 24% 40%, #d7b58d 41% 50%, #ae745d 51% 69%, #3b3944 70%); }
+    .art.earth::after { inset: 10% 18%; border: 1px solid #fff5; transform: rotate(12deg); }
+    .art.earth .art-label { text-align: left; }
+    .metadata { min-width: 0; }
+    .track-title { margin: 0; overflow: hidden; font-size: 23px; font-weight: 750; letter-spacing: -.045em; text-overflow: ellipsis; white-space: nowrap; }
+    .track-artist { margin-top: 5px; overflow: hidden; color: #d0c4c6; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+    .track-album { margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .timeline { margin-top: 18px; }
+    .track { height: 4px; overflow: hidden; border-radius: 9px; background: #514a52; }
+    .track > span { display: block; width: 38%; height: 100%; border-radius: inherit; background: var(--accent); }
+    .track-time { display: flex; justify-content: space-between; margin-top: 7px; color: #aaa2aa; font-size: 10px; font-variant-numeric: tabular-nums; }
+    .transport { display: flex; align-items: center; justify-content: center; gap: 30px; margin-top: 17px; }
+    .icon-button { display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 50%; background: transparent; color: #f4ece9; font: inherit; font-size: 23px; }
+    .icon-button.subtle { color: #c3b9c0; font-size: 21px; }
+    .icon-button.play { width: 62px; height: 62px; background: var(--accent-strong); color: #211b1c; font-size: 24px; box-shadow: 0 6px 24px #e6b48730; }
+    .quick-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid #332f37; }
+    .quick-control { display: flex; align-items: center; gap: 7px; color: #c4b9bf; font-size: 11px; }
+    .quick-control .symbol { color: #e6c1a8; font-size: 16px; }
+    .volume { margin-top: 17px; }
+    .volume-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: #d7cdd0; font-size: 11px; font-weight: 650; }
+    .volume-heading small { color: var(--muted); font-size: 10px; font-weight: 500; }
+    .volume-row { display: flex; align-items: center; gap: 10px; }
+    .volume-icon { color: #c8bdc2; font-size: 15px; }
+    .volume-track { flex: 1; height: 4px; overflow: hidden; border-radius: 9px; background: #514a52; }
+    .volume-track span { display: block; width: 66%; height: 100%; border-radius: inherit; background: #c9b8b2; }
+    .mute { padding: 6px 9px; border: 1px solid #514751; border-radius: 8px; color: #d5c9cc; font-size: 10px; }
+    .section-label { margin: 0 0 10px; color: #b4aab1; font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+    .card { padding: 14px; border: 1px solid #3e3740; border-radius: 15px; background: #242127; }
+    .mode-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .mode-label { color: #c9bdc3; font-size: 11px; }
+    .segmented { display: flex; gap: 3px; padding: 3px; border: 1px solid #47404a; border-radius: 10px; }
+    .segment { padding: 6px 9px; border-radius: 7px; color: #aaa1a9; font-size: 10px; white-space: nowrap; }
+    .segment.selected { background: #51403c; color: #f4d4bc; }
+    .balanced-art { width: min(100%, 286px); margin: 17px auto 19px; aspect-ratio: 1; border-radius: 18px; box-shadow: 0 17px 35px #0005; }
+    .balanced-meta { text-align: center; }
+    .balanced-meta .track-title { font-size: 21px; }
+    .balanced-meta .track-artist { font-size: 13px; }
+    .balanced-meta .track-album { margin-top: 3px; }
+    .balanced-screen .timeline { margin-top: 17px; }
+    .balanced-screen .transport { gap: 32px; margin-top: 13px; }
+    .balanced-screen .icon-button.play { width: 56px; height: 56px; }
+    .audio-card { margin-top: 16px; }
+    .audio-card .section-label { margin-bottom: 12px; }
+    .audio-card .volume { margin-top: 0; }
+    .audio-card .mode-row + .mode-row { margin-top: 12px; padding-top: 11px; border-top: 1px solid #3a343d; }
+    .queue-card { margin-top: 14px; padding: 13px 14px; border: 1px solid #3e3740; border-radius: 15px; background: #242127; }
+    .queue-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .queue-head h4 { margin: 0; font-size: 13px; letter-spacing: -.01em; }
+    .queue-count { margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .queue-head-actions { display: flex; align-items: center; gap: 6px; }
+    .queue-add, .queue-manage { padding: 7px 9px; border: 1px solid #514751; border-radius: 8px; background: transparent; color: #e6c1a8; font: inherit; font-size: 10px; font-weight: 650; }
+    .queue-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 0; border-top: 1px solid #3a343d; }
+    .queue-item:first-of-type { margin-top: 11px; }
+    .queue-handle { flex: 0 0 16px; color: #978d97; font-size: 15px; letter-spacing: -3px; }
+    .queue-art { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 7px; background: linear-gradient(145deg, #d6a77a 0 35%, #9a6b60 36% 62%, #39414b 63%); }
+    .queue-art.blue { background: radial-gradient(circle at 50% 40%, #e8c99e 0 16%, transparent 17%), linear-gradient(145deg, #527b7d, #233b48); }
+    .queue-art.green { background: linear-gradient(125deg, #52665c 0 34%, #c1ae82 35% 54%, #5d5c4d 55%); }
+    .queue-copy { min-width: 0; flex: 1; }
+    .queue-copy strong, .queue-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .queue-copy strong { color: #eee7e7; font-size: 11px; }
+    .queue-copy small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .queue-remove { display: grid; width: 27px; height: 27px; flex: 0 0 27px; place-items: center; border: 0; border-radius: 50%; background: #332e36; color: #c3b9c0; font: inherit; font-size: 17px; }
+    .queue-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid #3a343d; }
+    .queue-hint { color: #99909a; font-size: 9px; }
+    .queue-manage { padding: 6px 8px; border-color: transparent; }
+    .queue-focused { padding: 12px; }
+    .queue-focused .queue-item { padding: 9px 0; }
+    .queue-focused .queue-art { flex-basis: 31px; width: 31px; height: 31px; }
+    .deck-intro { display: flex; align-items: center; gap: 14px; margin-top: 17px; padding: 14px; border: 1px solid #3e3740; border-radius: 16px; background: #242127; }
+    .deck-art { flex: 0 0 76px; height: 76px; border-radius: 10px; }
+    .deck-intro .track-title { font-size: 16px; }
+    .deck-intro .track-artist { margin-top: 4px; font-size: 12px; }
+    .deck-intro .track-album { font-size: 10px; }
+    .state { display: inline-flex; align-items: center; gap: 6px; margin-top: 7px; color: #abc7af; font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+    .state::before { width: 5px; height: 5px; border-radius: 50%; background: #8fc19b; content: ""; }
+    .deck-screen .timeline { padding: 13px 14px 12px; border: 1px solid #3e3740; border-radius: 14px; background: #242127; }
+    .deck-screen .transport { justify-content: space-around; gap: 8px; margin-top: 14px; }
+    .deck-screen .icon-button { width: 48px; height: 48px; }
+    .deck-screen .icon-button.play { width: 66px; height: 66px; }
+    .deck-screen .section-label { margin-bottom: 11px; }
+    .deck-screen .volume-card { margin-top: 15px; }
+    .deck-screen .volume { margin-top: 0; }
+    .deck-screen .mode-card { margin-top: 12px; }
+    .deck-screen .mode-row + .mode-row { margin-top: 11px; padding-top: 11px; border-top: 1px solid #3a343d; }
+    .takeaway { max-width: 390px; margin: 14px auto 0; color: #afa6aa; font-size: 12px; line-height: 1.55; }
+    .takeaway strong { color: #e6c1a8; }
+    .footer { margin-top: 48px; padding-top: 22px; border-top: 1px solid #373039; color: #aaa1a6; font-size: 13px; line-height: 1.7; }
+    .footer strong { color: #e8ddd7; }
+    @media (max-width: 1040px) {
+      .concepts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .concept:last-child { grid-column: 1 / -1; }
+      .concept:last-child .phone, .concept:last-child .takeaway { margin-left: auto; margin-right: auto; }
+    }
+    @media (max-width: 700px) {
+      .page { padding: 30px 18px 55px; }
+      .concepts { grid-template-columns: 1fr; gap: 36px; }
+      .concept:last-child { grid-column: auto; }
+      .description { min-height: 0; }
+      .phone { max-width: 390px; }
+    }
+    @media (max-width: 390px) {
+      .page { padding-right: 12px; padding-left: 12px; }
+      .phone { height: 790px; border-radius: 29px; }
+      .screen { padding-right: 16px; padding-left: 16px; }
+      .balanced-art { width: min(100%, 258px); }
+      .segmented { gap: 1px; }
+      .segment { padding-right: 7px; padding-left: 7px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="eyebrow">Lyriamp · player exploration</div>
+    <h1>Make the player feel like home.</h1>
+    <p class="intro">Three directions for a more considered full-screen player, now with queue management in the mix. Compare how each balances artwork, playback, room controls, and the ability to add, reorder, and remove upcoming tracks.</p>
+    <div class="note">Concept mockups · queue actions are proposed · controls are not connected</div>
+
+    <div class="concepts">
+      <section class="concept">
+        <div class="concept-label"><span>01</span><h2>Artwork first</h2></div>
+        <p class="description">A warm, immersive listening view, with an up-next peek for quick queue edits below the transport controls.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span class="status-icons">◈ ▰</span></div>
+          <div class="screen">
+            <div class="top">
+              <div class="top-title"><span class="chevron">⌄</span> NOW PLAYING</div>
+              <div class="player-pill">Den · Living Room</div>
+            </div>
+            <div class="art" style="width:min(100%, 286px); aspect-ratio:1; border-radius:22px; margin:5px auto 0"><span class="art-label">COLLAPSED IN SUNBEAMS</span></div>
+            <div class="metadata" style="margin-top:19px">
+              <h3 class="track-title">Weightless</h3>
+              <div class="track-artist">Arlo Parks</div>
+              <div class="track-album">Collapsed in Sunbeams</div>
+            </div>
+            <div class="timeline">
+              <div class="track"><span></span></div>
+              <div class="track-time"><span>1:42</span><span>4:12</span></div>
+            </div>
+            <div class="transport">
+              <button class="icon-button subtle" aria-label="Previous track">|◀</button>
+              <button class="icon-button play" aria-label="Pause">Ⅱ</button>
+              <button class="icon-button subtle" aria-label="Next track">▶|</button>
+            </div>
+            <div class="quick-controls">
+              <div class="quick-control"><span class="symbol">⤨</span> Shuffle · Off</div>
+              <div class="quick-control"><span class="symbol">↻</span> Repeat · Off</div>
+            </div>
+            <div class="queue-card">
+              <div class="queue-head">
+                <div><h4>Up next</h4><div class="queue-count">7 tracks in queue</div></div>
+                <div class="queue-head-actions"><button class="queue-add" type="button">+ Add</button></div>
+              </div>
+              <div class="queue-item">
+                <span class="queue-handle" aria-hidden="true">⠿</span><div class="queue-art blue"></div>
+                <div class="queue-copy"><strong>Saltwater</strong><small>Nora Vale</small></div>
+                <button class="queue-remove" type="button" aria-label="Remove Saltwater from queue">×</button>
+              </div>
+              <div class="queue-item">
+                <span class="queue-handle" aria-hidden="true">⠿</span><div class="queue-art green"></div>
+                <div class="queue-copy"><strong>Golden Hour</strong><small>The Paper Moons</small></div>
+                <button class="queue-remove" type="button" aria-label="Remove Golden Hour from queue">×</button>
+              </div>
+              <div class="queue-footer"><span class="queue-hint">Drag to reorder · × to remove</span><button class="queue-manage" type="button">Full queue ›</button></div>
+            </div>
+            <div class="volume">
+              <div class="volume-heading"><span>Volume</span><small>66%</small></div>
+              <div class="volume-row"><span class="volume-icon">◖</span><div class="volume-track"><span></span></div><span class="mute">Mute</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="takeaway"><strong>Trade-off:</strong> Queue edits are close to playback; the artwork gives up a little space to keep the up-next preview in view.</p>
+      </section>
+
+      <section class="concept">
+        <div class="concept-label"><span>02</span><h2>Balanced listening</h2></div>
+        <p class="description">A familiar player layout with an inline, editable up-next list and a separate audio-controls card.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span class="status-icons">◈ ▰</span></div>
+          <div class="screen balanced-screen">
+            <div class="top">
+              <div class="top-title"><span class="chevron">⌄</span> NOW PLAYING</div>
+              <div class="player-pill">Den · Living Room</div>
+            </div>
+            <div class="art alt balanced-art"><span class="art-label">BLUE WAYS</span></div>
+            <div class="metadata balanced-meta">
+              <h3 class="track-title">Open Water</h3>
+              <div class="track-artist">Nora Vale</div>
+              <div class="track-album">Blue Ways</div>
+            </div>
+            <div class="timeline">
+              <div class="track"><span style="width:52%"></span></div>
+              <div class="track-time"><span>2:18</span><span>4:26</span></div>
+            </div>
+            <div class="transport">
+              <button class="icon-button subtle" aria-label="Previous track">|◀</button>
+              <button class="icon-button play" aria-label="Pause">Ⅱ</button>
+              <button class="icon-button subtle" aria-label="Next track">▶|</button>
+            </div>
+            <div class="queue-card">
+              <div class="queue-head">
+                <div><h4>Up next</h4><div class="queue-count">6 tracks · playing 2 of 8</div></div>
+                <div class="queue-head-actions"><button class="queue-add" type="button">+ Add</button></div>
+              </div>
+              <div class="queue-item">
+                <span class="queue-handle" aria-hidden="true">⠿</span><div class="queue-art"></div>
+                <div class="queue-copy"><strong>Northbound</strong><small>Lowland</small></div>
+                <button class="queue-remove" type="button" aria-label="Remove Northbound from queue">×</button>
+              </div>
+              <div class="queue-item">
+                <span class="queue-handle" aria-hidden="true">⠿</span><div class="queue-art green"></div>
+                <div class="queue-copy"><strong>Wide Open</strong><small>Northbound</small></div>
+                <button class="queue-remove" type="button" aria-label="Remove Wide Open from queue">×</button>
+              </div>
+              <div class="queue-footer"><span class="queue-hint">Hold and drag to reorder</span><button class="queue-manage" type="button">Manage queue ›</button></div>
+            </div>
+            <div class="card audio-card">
+              <div class="section-label">Playback &amp; audio</div>
+              <div class="volume">
+                <div class="volume-heading"><span>Volume</span><small>66%</small></div>
+                <div class="volume-row"><span class="volume-icon">◖</span><div class="volume-track"><span></span></div><span class="mute">Mute</span></div>
+              </div>
+              <div class="mode-row" style="margin-top:13px; padding-top:11px; border-top:1px solid #3a343d">
+                <span class="mode-label">Shuffle</span>
+                <div class="segmented"><span class="segment selected">Off</span><span class="segment">Songs</span><span class="segment">Albums</span></div>
+              </div>
+              <div class="mode-row" style="margin-top:11px">
+                <span class="mode-label">Repeat</span>
+                <div class="segmented"><span class="segment selected">Off</span><span class="segment">Track</span><span class="segment">Playlist</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="takeaway"><strong>Trade-off:</strong> Queue editing is always visible, though room controls move farther down on compact devices.</p>
+      </section>
+
+      <section class="concept">
+        <div class="concept-label"><span>03</span><h2>Queue control deck</h2></div>
+        <p class="description">A compact now-playing summary with a larger queue panel for managing what comes next.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span class="status-icons">◈ ▰</span></div>
+          <div class="screen deck-screen">
+            <div class="top">
+              <div class="top-title"><span class="chevron">⌄</span> NOW PLAYING</div>
+              <div class="player-pill">Den · Living Room</div>
+            </div>
+            <div class="deck-intro">
+              <div class="art earth deck-art"><span class="art-label">FIELD NOTES</span></div>
+              <div class="metadata">
+                <h3 class="track-title">Morning Light</h3>
+                <div class="track-artist">The Paper Moons</div>
+                <div class="track-album">Field Notes</div>
+                <div class="state">Playing</div>
+              </div>
+            </div>
+            <div class="timeline">
+              <div class="track"><span style="width:29%"></span></div>
+              <div class="track-time"><span>0:58</span><span>3:21</span></div>
+            </div>
+            <div class="transport">
+              <button class="icon-button subtle" aria-label="Previous track">|◀</button>
+              <button class="icon-button play" aria-label="Pause">Ⅱ</button>
+              <button class="icon-button subtle" aria-label="Next track">▶|</button>
+            </div>
+            <div class="card queue-card queue-focused">
+              <div class="queue-head">
+                <div><h4>Queue</h4><div class="queue-count">Now playing · 3 of 10</div></div>
+                <div class="queue-head-actions"><button class="queue-add" type="button">+ Add tracks</button></div>
+              </div>
+              <div class="queue-item">
+                <span class="queue-handle" aria-hidden="true">⠿</span><div class="queue-art blue"></div>
+                <div class="queue-copy"><strong>Open Water</strong><small>Nora Vale · 3:48</small></div>
+                <button class="queue-remove" type="button" aria-label="Remove Open Water from queue">×</button>
+              </div>
+              <div class="queue-item">
+                <span class="queue-handle" aria-hidden="true">⠿</span><div class="queue-art"></div>
+                <div class="queue-copy"><strong>Stay a While</strong><small>June &amp; The Sea · 4:02</small></div>
+                <button class="queue-remove" type="button" aria-label="Remove Stay a While from queue">×</button>
+              </div>
+              <div class="queue-item">
+                <span class="queue-handle" aria-hidden="true">⠿</span><div class="queue-art green"></div>
+                <div class="queue-copy"><strong>Field Notes</strong><small>Lowland · 3:16</small></div>
+                <button class="queue-remove" type="button" aria-label="Remove Field Notes from queue">×</button>
+              </div>
+              <div class="queue-footer"><span class="queue-hint">Drag handle to reorder · × to remove</span><button class="queue-manage" type="button">See all 10 ›</button></div>
+            </div>
+            <div class="card volume-card">
+              <div class="section-label">Room volume</div>
+              <div class="volume">
+                <div class="volume-heading"><span>Output level</span><small>66%</small></div>
+                <div class="volume-row"><span class="volume-icon">◖</span><div class="volume-track"><span></span></div><span class="mute">Mute</span></div>
+              </div>
+            </div>
+            <div class="card mode-card">
+              <div class="section-label">Playback modes</div>
+              <div class="mode-row">
+                <span class="mode-label">Shuffle</span>
+                <div class="segmented"><span class="segment selected">Off</span><span class="segment">Songs</span><span class="segment">Albums</span></div>
+              </div>
+              <div class="mode-row">
+                <span class="mode-label">Repeat</span>
+                <div class="segmented"><span class="segment selected">Off</span><span class="segment">Track</span><span class="segment">Playlist</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="takeaway"><strong>Trade-off:</strong> The clearest queue management; volume and playback modes require scrolling below the list.</p>
+      </section>
+    </div>
+    <div class="footer"><strong>Queue management is a proposed extension, not existing behavior.</strong> These mockups explore adding tracks, reordering upcoming items, and removing them from the queue while retaining the current player controls and library browsing model. Queue actions are illustrative; nothing here is connected to LMS.</div>
+  </main>
+</body>
+</html>

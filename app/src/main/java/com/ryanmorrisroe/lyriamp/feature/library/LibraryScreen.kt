@@ -6,6 +6,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
@@ -76,6 +78,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.DpSize
@@ -94,6 +97,7 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
+import com.ryanmorrisroe.lyriamp.data.lms.LmsQueueAddPosition
 import com.ryanmorrisroe.lyriamp.data.lms.LmsProtocolException
 import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
@@ -127,7 +131,9 @@ fun LibraryScreen(
     onOpenNowPlaying: () -> Unit,
     sessionError: String? = null,
     onRetrySessionSave: () -> Unit = {},
-    onLibraryStateChanged: (List<LibraryLocation>, String, LastSessionScrollAnchor?) -> Unit = { _, _, _ -> }
+    onLibraryStateChanged: (List<LibraryLocation>, String, LastSessionScrollAnchor?) -> Unit = { _, _, _ -> },
+    queuePickerMode: Boolean = false,
+    onBackFromQueuePicker: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val connectionState by connectionViewModel.uiState.collectAsStateWithLifecycle()
@@ -209,8 +215,9 @@ fun LibraryScreen(
             mediaPlayer?.prepare()
         }
     }
-    BackHandler(enabled = !state.isAtRoot || state.searchText.isNotBlank()) {
+    BackHandler(enabled = queuePickerMode || !state.isAtRoot || state.searchText.isNotBlank()) {
         if (state.searchText.isNotBlank()) viewModel.setSearchText("")
+        else if (queuePickerMode && state.isAtRoot) onBackFromQueuePicker()
         else viewModel.navigateBack()
     }
     LaunchedEffect(state.locationStack, state.searchText, items.loadState.refresh) {
@@ -265,12 +272,24 @@ fun LibraryScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(if (state.searchText.isBlank()) state.location.title else "Search")
+                    Text(
+                        when {
+                            queuePickerMode -> "Add to queue"
+                            state.searchText.isNotBlank() -> "Search"
+                            else -> state.location.title
+                        }
+                    )
                 },
                 navigationIcon = {
-                    if (!state.isAtRoot && state.searchText.isBlank()) {
+                    if (queuePickerMode || !state.isAtRoot && state.searchText.isBlank()) {
                         IconButton(
-                            onClick = viewModel::navigateBack,
+                            onClick = {
+                                when {
+                                    state.searchText.isNotBlank() -> viewModel.setSearchText("")
+                                    queuePickerMode && state.isAtRoot -> onBackFromQueuePicker()
+                                    else -> viewModel.navigateBack()
+                                }
+                            },
                             modifier = Modifier.semantics {
                                 contentDescription = "Back"
                             }
@@ -284,7 +303,7 @@ fun LibraryScreen(
                     }
                 },
                 actions = {
-                    if (state.selectedTab != LibraryTab.HOME) {
+                    if (!queuePickerMode && state.selectedTab != LibraryTab.HOME) {
                         IconButton(
                             onClick = {
                                 if (searchVisible) viewModel.setSearchText("")
@@ -301,7 +320,7 @@ fun LibraryScreen(
                             )
                         }
                     }
-                    Box {
+                    if (!queuePickerMode) Box {
                         IconButton(
                             onClick = { actionsExpanded = true },
                             modifier = Modifier.semantics {
@@ -338,7 +357,7 @@ fun LibraryScreen(
             )
         },
         bottomBar = {
-            PlayerStrip(
+            if (!queuePickerMode) PlayerStrip(
                     modifier = Modifier.navigationBarsPadding(),
                 activePlayer = state.activePlayer,
                 mediaPlayer = mediaPlayer,
@@ -446,6 +465,14 @@ fun LibraryScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+            connectionState.playerQueueErrorMessage?.let {
+                Text(
+                    it,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             displayState.error?.let {
                 Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
                 TextButton(onClick = displayPreferencesViewModel::retry) { Text("Retry reading settings") }
@@ -541,6 +568,15 @@ fun LibraryScreen(
                     isPlayingItem = state.isPlayingItem,
                     onOpenItem = viewModel::openItem,
                     onPlayNow = viewModel::playNow,
+                    onAddToQueue = { item ->
+                        connectionViewModel.addPlayerQueueItem(item, LmsQueueAddPosition.END)
+                    },
+                    onPlayNext = { item ->
+                        connectionViewModel.addPlayerQueueItem(item, LmsQueueAddPosition.NEXT)
+                    },
+                    isQueueBusy = connectionState.isMutatingPlayerQueue ||
+                        connectionState.isLoadingPlayerQueue,
+                    queuePickerMode = queuePickerMode,
                     onResolveArtistArtwork = artistArtworkResolver,
                     onRetry = items::retry
                 )
@@ -573,6 +609,10 @@ private fun LibraryResults(
     isPlayingItem: Boolean,
     onOpenItem: (LmsLibraryItem) -> Unit,
     onPlayNow: (LmsLibraryItem) -> Unit,
+    onAddToQueue: (LmsLibraryItem) -> Unit,
+    onPlayNext: (LmsLibraryItem) -> Unit,
+    isQueueBusy: Boolean,
+    queuePickerMode: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     onRetry: () -> Unit
 ) {
@@ -614,8 +654,18 @@ private fun LibraryResults(
                         isSearchResults = isSearchResults,
                         isPlayingItem = isPlayingItem,
                         onResolveArtistArtwork = onResolveArtistArtwork,
-                        onOpen = { onOpenItem(item) },
-                        onPlayNow = { onPlayNow(item) }
+                        onOpen = {
+                            if (queuePickerMode && item.type == LmsLibraryItemType.TRACK) {
+                                onAddToQueue(item)
+                            } else {
+                                onOpenItem(item)
+                            }
+                        },
+                        onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
+                        onAddToQueue = { onAddToQueue(item) },
+                        onPlayNext = { onPlayNext(item) },
+                        isQueueBusy = isQueueBusy,
+                        queuePickerMode = queuePickerMode
                     )
                 } else {
                     LibraryItemRow(
@@ -626,7 +676,11 @@ private fun LibraryResults(
                         isPlayingItem = isPlayingItem,
                         onResolveArtistArtwork = onResolveArtistArtwork,
                         onOpen = { onOpenItem(item) },
-                        onPlayNow = { onPlayNow(item) }
+                        onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
+                        onAddToQueue = { onAddToQueue(item) },
+                        onPlayNext = { onPlayNext(item) },
+                        isQueueBusy = isQueueBusy,
+                        queuePickerMode = queuePickerMode
                     )
                 }
             } else {
@@ -652,14 +706,22 @@ private fun LibraryItemRow(
     isPlayingItem: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     onOpen: () -> Unit,
-    onPlayNow: () -> Unit
+    onPlayNow: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onPlayNext: () -> Unit,
+    isQueueBusy: Boolean,
+    queuePickerMode: Boolean
 ) {
     val canPlay = item.canPlay()
     val subtitle = item.displaySubtitle(isSearchResults)
 
     ListItem(
         modifier = Modifier.clickable {
-            if (item.type == LmsLibraryItemType.TRACK) onPlayNow() else onOpen()
+            if (item.type == LmsLibraryItemType.TRACK) {
+                if (queuePickerMode) onAddToQueue() else onPlayNow()
+            } else {
+                onOpen()
+            }
         },
         leadingContent = if (showArtwork) {
             {
@@ -680,7 +742,14 @@ private fun LibraryItemRow(
         } else null,
         trailingContent = {
             if (canPlay) {
-                LibraryPlayButton(item.title, isPlayingItem, onPlayNow)
+                LibraryPlayButton(
+                    itemTitle = item.title,
+                    isBusy = isPlayingItem || isQueueBusy,
+                    queuePickerMode = queuePickerMode,
+                    onPlayNow = onPlayNow,
+                    onAddToQueue = onAddToQueue,
+                    onPlayNext = onPlayNext
+                )
             } else {
                 TextButton(onClick = onOpen) { Text(if (item.isContainer) "Open" else "Browse") }
             }
@@ -696,7 +765,11 @@ private fun LibraryItemCard(
     isPlayingItem: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     onOpen: () -> Unit,
-    onPlayNow: () -> Unit
+    onPlayNow: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onPlayNext: () -> Unit,
+    isQueueBusy: Boolean,
+    queuePickerMode: Boolean
 ) {
     Column(Modifier.padding(8.dp).clickable(onClick = onOpen)) {
         val subtitle = item.displaySubtitle(isSearchResults)
@@ -712,29 +785,77 @@ private fun LibraryItemCard(
             Text(subtitle, maxLines = 1, style = MaterialTheme.typography.bodySmall)
         }
         if (item.canPlay()) {
-            LibraryPlayButton(item.title, isPlayingItem, onPlayNow)
+            LibraryPlayButton(
+                itemTitle = item.title,
+                isBusy = isPlayingItem || isQueueBusy,
+                queuePickerMode = queuePickerMode,
+                onPlayNow = onPlayNow,
+                onAddToQueue = onAddToQueue,
+                onPlayNext = onPlayNext
+            )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryPlayButton(
     itemTitle: String,
-    isPlayingItem: Boolean,
-    onPlayNow: () -> Unit
+    isBusy: Boolean,
+    queuePickerMode: Boolean,
+    onPlayNow: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onPlayNext: () -> Unit
 ) {
-    IconButton(
-        onClick = onPlayNow,
-        enabled = !isPlayingItem,
-        modifier = Modifier.semantics {
-            contentDescription = "Play $itemTitle"
+    var menuExpanded by remember(itemTitle) { mutableStateOf(false) }
+    Box {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .combinedClickable(
+                    enabled = !isBusy,
+                    onClick = if (queuePickerMode) onAddToQueue else onPlayNow,
+                    onLongClick = if (queuePickerMode) null else ({ menuExpanded = true }),
+                    role = Role.Button
+                )
+                .semantics {
+                    contentDescription = if (queuePickerMode) {
+                        "Add $itemTitle to queue"
+                    } else {
+                        "Play $itemTitle"
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (queuePickerMode) {
+                Text("+", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.headlineSmall)
+            } else {
+                LibraryGlyphIcon(
+                    LibraryGlyph.PLAY,
+                    MaterialTheme.colorScheme.primary,
+                    Modifier.size(24.dp)
+                )
+            }
         }
-    ) {
-        LibraryGlyphIcon(
-            LibraryGlyph.PLAY,
-            MaterialTheme.colorScheme.primary,
-            Modifier.size(24.dp)
-        )
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Add to end") },
+                onClick = {
+                    menuExpanded = false
+                    onAddToQueue()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Play next") },
+                onClick = {
+                    menuExpanded = false
+                    onPlayNext()
+                }
+            )
+        }
     }
 }
 

@@ -9,8 +9,33 @@ data class LmsPlayerStatus(
     val durationSeconds: Double?,
     val canSeek: Boolean,
     val artworkId: String? = null,
-    val artworkUrl: String? = null
+    val artworkUrl: String? = null,
+    val playlistIndex: Int? = null,
+    val trackId: String? = null
 )
+
+data class LmsQueueItem(
+    val index: Int,
+    val trackId: String?,
+    val title: String,
+    val artist: String?,
+    val album: String?,
+    val durationSeconds: Double?,
+    val artworkId: String?,
+    val artworkUrl: String?
+)
+
+data class LmsPlayerQueuePage(
+    val items: List<LmsQueueItem>,
+    val offset: Int,
+    val totalCount: Int,
+    val currentIndex: Int?
+)
+
+enum class LmsQueueAddPosition {
+    END,
+    NEXT
+}
 
 data class LmsPlayerMixerState(
     val volumePercent: Int,
@@ -87,6 +112,33 @@ sealed interface LmsPlayerCommand {
 
 interface LmsPlayerRemoteGateway {
     suspend fun getPlayerStatus(connection: LmsServerConnection, playerId: String): LmsPlayerStatus
+
+    suspend fun getPlayerQueue(
+        connection: LmsServerConnection,
+        playerId: String,
+        offset: Int,
+        limit: Int
+    ): LmsPlayerQueuePage
+
+    suspend fun addQueueItem(
+        connection: LmsServerConnection,
+        playerId: String,
+        item: LmsLibraryItem,
+        position: LmsQueueAddPosition
+    )
+
+    suspend fun removeQueueItem(
+        connection: LmsServerConnection,
+        playerId: String,
+        index: Int
+    )
+
+    suspend fun moveQueueItem(
+        connection: LmsServerConnection,
+        playerId: String,
+        fromIndex: Int,
+        toIndex: Int
+    )
 
     suspend fun getPlayerMixerState(
         connection: LmsServerConnection,
