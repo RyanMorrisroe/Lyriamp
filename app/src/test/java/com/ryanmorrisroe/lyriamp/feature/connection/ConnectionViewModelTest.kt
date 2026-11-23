@@ -21,10 +21,13 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsQueueAddPosition
 import com.ryanmorrisroe.lyriamp.data.lms.LmsQueueItem
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerInfo
+import com.ryanmorrisroe.lyriamp.data.lms.SavedLmsPlayerGroup
 import com.ryanmorrisroe.lyriamp.data.persistence.SavedServerProfile
 import com.ryanmorrisroe.lyriamp.data.persistence.SavedServerRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.PlayerGroupRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -86,11 +89,69 @@ class ConnectionViewModelTest {
     }
 
     @Test
+    fun localNetworkPermissionDenialExplainsRequiredAccess() {
+        runViewModelTest {
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", 0) },
+                LmsPlayerDirectory { emptyList() },
+                unusedPlayerRemoteGateway()
+            )
+
+            viewModel.onLocalNetworkPermissionDenied()
+
+            assertEquals(
+                "Local network access is required to contact your LMS server.",
+                viewModel.uiState.value.errorMessage
+            )
+        }
+    }
+
+    @Test
+    fun savingServerRejectsInvalidInputAndReportsStorageFailure() {
+        runViewModelTest {
+            val repository = FakeSavedServerRepository(
+                saveFailure = IllegalStateException("storage unavailable")
+            )
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", 0) },
+                LmsPlayerDirectory { emptyList() },
+                unusedPlayerRemoteGateway(),
+                savedServerRepository = repository
+            )
+            viewModel.onHostChanged("lms.local")
+            viewModel.onPortChanged("9000x")
+
+            viewModel.saveServer()
+
+            assertEquals("Enter a valid port.", viewModel.uiState.value.savedServerErrorMessage)
+            assertFalse(viewModel.uiState.value.isSavingServer)
+
+            viewModel.onPortChanged("9000")
+            viewModel.onHostChanged("lms.local/path")
+            viewModel.saveServer()
+
+            assertEquals(
+                "Enter a hostname or IP address without a scheme or path.",
+                viewModel.uiState.value.savedServerErrorMessage
+            )
+
+            viewModel.onHostChanged("lms.local")
+            viewModel.saveServer()
+            advanceUntilIdle()
+
+            assertEquals("Could not save this server.", viewModel.uiState.value.savedServerErrorMessage)
+            assertFalse(viewModel.uiState.value.isSavingServer)
+        }
+    }
+
+    @Test
     fun successfulConnectionPublishesServerInfo() {
         runViewModelTest {
             var requestedConnection: LmsServerConnection? = null
+            var requestCount = 0
             val viewModel = ConnectionViewModel(
                 LmsConnectionGateway { connection ->
+                    requestCount++
                     requestedConnection = connection
                     LmsServerInfo(version = "9.2.0", playerCount = 3)
                 },
@@ -107,8 +168,10 @@ class ConnectionViewModelTest {
 
             viewModel.testConnection()
             assertTrue(viewModel.uiState.value.isConnecting)
+            viewModel.testConnection()
             advanceUntilIdle()
 
+            assertEquals(1, requestCount)
             assertEquals("lms.local", requestedConnection?.host)
             assertTrue(requestedConnection?.useHttps == true)
             assertEquals("listener", requestedConnection?.username)
@@ -198,6 +261,31 @@ class ConnectionViewModelTest {
 
             assertEquals(0, requestCount)
             assertEquals("Enter a valid port.", viewModel.uiState.value.errorMessage)
+        }
+    }
+
+    @Test
+    fun invalidHostDoesNotCallGateway() {
+        runViewModelTest {
+            var requestCount = 0
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway {
+                    requestCount++
+                    LmsServerInfo("9.2.0", 0)
+                },
+                LmsPlayerDirectory { emptyList() },
+                unusedPlayerRemoteGateway()
+            )
+            viewModel.onHostChanged("lms.local/path")
+
+            viewModel.testConnection()
+            advanceUntilIdle()
+
+            assertEquals(0, requestCount)
+            assertEquals(
+                "Enter a hostname or IP address without a scheme or path.",
+                viewModel.uiState.value.errorMessage
+            )
         }
     }
 
@@ -326,7 +414,7 @@ class ConnectionViewModelTest {
                 ),
                 sentCommands
             )
-            assertEquals(4, statusRequestCount)
+            assertEquals(5, statusRequestCount)
             assertEquals(2, mixerStateRequestCount)
             assertEquals(2, playbackOptionsRequestCount)
             assertEquals(
@@ -842,11 +930,329 @@ class ConnectionViewModelTest {
         }
     }
 
+    @Test
+    fun playerGroupBuilderStagesChangesAndSoloSelectionDissolvesTheLiveGroup() {
+        runViewModelTest {
+            val players = listOf(
+                LmsPlayer("aa:bb", "Living Room", "Squeezebox", true, true),
+                LmsPlayer("cc:dd", "Kitchen", "Squeezebox", true, true),
+                LmsPlayer("ee:ff", "Bedroom", "Squeezebox", true, true)
+            )
+            val liveGroup = linkedSetOf<String>()
+            val syncCommands = mutableListOf<Pair<String, String>>()
+            val unsyncCommands = mutableListOf<String>()
+            val remoteGateway = object : TestPlayerRemoteGateway() {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerStatus(
+                    LmsPlaybackMode.PLAYING,
+                    "Track $playerId",
+                    "Artist",
+                    "Album",
+                    0.0,
+                    120.0,
+                    true
+                )
+
+                override suspend fun getSyncGroupMembers(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = liveGroup.takeIf { playerId in it }?.toList() ?: listOf(playerId)
+
+                override suspend fun syncPlayers(
+                    connection: LmsServerConnection,
+                    leaderPlayerId: String,
+                    memberPlayerId: String
+                ) {
+                    syncCommands += leaderPlayerId to memberPlayerId
+                    liveGroup += leaderPlayerId
+                    liveGroup += memberPlayerId
+                }
+
+                override suspend fun unsyncPlayer(connection: LmsServerConnection, playerId: String) {
+                    unsyncCommands += playerId
+                    liveGroup -= playerId
+                }
+            }
+            val activePlayerStore = LmsActivePlayerStore()
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", players.size) },
+                LmsPlayerDirectory { players },
+                remoteGateway,
+                activePlayerStore
+            )
+            viewModel.onHostChanged("lms.local")
+            viewModel.testConnection()
+            advanceUntilIdle()
+
+            assertEquals("Track aa:bb", viewModel.uiState.value.playerStatusesById["aa:bb"]?.title)
+            viewModel.beginGroupBuilder()
+            viewModel.setGroupBuilderPlayerSelected("aa:bb", true)
+            viewModel.setGroupBuilderPlayerSelected("cc:dd", true)
+            advanceUntilIdle()
+            assertTrue(syncCommands.isEmpty())
+            assertTrue(viewModel.uiState.value.selectedPlayerIds.isEmpty())
+
+            viewModel.applyGroupBuilder()
+            advanceUntilIdle()
+            assertEquals(listOf("aa:bb" to "cc:dd"), syncCommands)
+            assertEquals(listOf("aa:bb", "cc:dd"), activePlayerStore.activePlayer.value?.selectedPlayerIds)
+
+            viewModel.addPlayerToCurrentSelection("ee:ff")
+            advanceUntilIdle()
+            assertEquals(
+                listOf("aa:bb" to "cc:dd", "aa:bb" to "ee:ff"),
+                syncCommands
+            )
+            assertEquals("aa:bb", activePlayerStore.activePlayer.value?.playerId)
+
+            viewModel.selectPlayer("cc:dd")
+            advanceUntilIdle()
+            assertEquals(listOf("cc:dd"), viewModel.uiState.value.selectedPlayerIds)
+            assertEquals("cc:dd", activePlayerStore.activePlayer.value?.playerId)
+            assertTrue(liveGroup.isEmpty())
+            assertEquals(setOf("aa:bb", "cc:dd", "ee:ff"), unsyncCommands.toSet())
+        }
+    }
+
+    @Test
+    fun savedPlayerGroupsCanBeSavedSelectedAndDeletedWithoutChangingLiveSync() {
+        runViewModelTest {
+            val players = listOf(
+                LmsPlayer("aa:bb", "Living Room", "Squeezebox", true, true),
+                LmsPlayer("cc:dd", "Kitchen", "Squeezebox", true, true),
+                LmsPlayer("ee:ff", "Bedroom", "Squeezebox", true, true)
+            )
+            val liveGroup = linkedSetOf<String>()
+            val repository = FakePlayerGroupRepository()
+            val remoteGateway = object : TestPlayerRemoteGateway() {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerStatus(
+                    LmsPlaybackMode.PLAYING,
+                    "Track $playerId",
+                    "Artist",
+                    "Album",
+                    0.0,
+                    120.0,
+                    true
+                )
+
+                override suspend fun getSyncGroupMembers(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = liveGroup.takeIf { playerId in it }?.toList() ?: listOf(playerId)
+
+                override suspend fun syncPlayers(
+                    connection: LmsServerConnection,
+                    leaderPlayerId: String,
+                    memberPlayerId: String
+                ) {
+                    liveGroup += leaderPlayerId
+                    liveGroup += memberPlayerId
+                }
+            }
+            val activePlayerStore = LmsActivePlayerStore()
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", players.size) },
+                LmsPlayerDirectory { players },
+                remoteGateway,
+                activePlayerStore,
+                playerGroupRepository = repository
+            )
+            viewModel.onHostChanged("lms.local")
+            viewModel.testConnection()
+            advanceUntilIdle()
+
+            viewModel.beginGroupBuilder()
+            viewModel.setGroupNameDraft("Whole home")
+            viewModel.setGroupBuilderPlayerSelected("aa:bb", true)
+            viewModel.setGroupBuilderPlayerSelected("cc:dd", true)
+            viewModel.savePlayerGroup(viewModel.uiState.value.groupNameDraft)
+            advanceUntilIdle()
+
+            val savedGroup = viewModel.uiState.value.playerGroups.single()
+            assertEquals("Whole home", savedGroup.name)
+            assertEquals(listOf("aa:bb", "cc:dd"), savedGroup.playerIds)
+            assertEquals("Player group saved.", viewModel.uiState.value.playerGroupMessage)
+
+            viewModel.beginGroupBuilder(savedGroup)
+            viewModel.setGroupBuilderPlayerSelected("ee:ff", true)
+            viewModel.setGroupNameDraft("Whole home updated")
+            viewModel.savePlayerGroup(
+                viewModel.uiState.value.groupNameDraft,
+                groupId = savedGroup.id
+            )
+            advanceUntilIdle()
+
+            val updatedGroup = viewModel.uiState.value.playerGroups.single()
+            assertEquals(savedGroup.id, updatedGroup.id)
+            assertEquals("Whole home updated", updatedGroup.name)
+            assertEquals(listOf("aa:bb", "cc:dd", "ee:ff"), updatedGroup.playerIds)
+            assertEquals("Player group updated.", viewModel.uiState.value.playerGroupMessage)
+            assertTrue(liveGroup.isEmpty())
+
+            viewModel.selectPlayerGroup(updatedGroup.id)
+            advanceUntilIdle()
+
+            assertEquals(listOf("aa:bb", "cc:dd", "ee:ff"), viewModel.uiState.value.selectedPlayerIds)
+            assertEquals("aa:bb", activePlayerStore.activePlayer.value?.playerId)
+
+            viewModel.removePlayerGroup(savedGroup.id)
+            advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.playerGroups.isEmpty())
+            assertEquals("Player group deleted.", viewModel.uiState.value.playerGroupMessage)
+            assertEquals(setOf("aa:bb", "cc:dd", "ee:ff"), liveGroup)
+        }
+    }
+
+    @Test
+    fun unavailableAndInvalidSavedGroupsReportErrors() {
+        runViewModelTest {
+            val players = listOf(
+                LmsPlayer("aa:bb", "Living Room", "Squeezebox", true, true),
+                LmsPlayer("cc:dd", "Kitchen", "Squeezebox", true, true),
+                LmsPlayer("ee:ff", "Bedroom", "Squeezebox", false, false)
+            )
+            val noRepositoryViewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", players.size) },
+                LmsPlayerDirectory { players },
+                object : TestPlayerRemoteGateway() {}
+            )
+            noRepositoryViewModel.onHostChanged("lms.local")
+            noRepositoryViewModel.testConnection()
+            advanceUntilIdle()
+            noRepositoryViewModel.savePlayerGroup("Whole home")
+            assertEquals(
+                "Saved player groups are not available.",
+                noRepositoryViewModel.uiState.value.playerGroupErrorMessage
+            )
+
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", players.size) },
+                LmsPlayerDirectory { players },
+                object : TestPlayerRemoteGateway() {},
+                playerGroupRepository = FakePlayerGroupRepository()
+            )
+            viewModel.onHostChanged("lms.local")
+            viewModel.testConnection()
+            advanceUntilIdle()
+
+            viewModel.savePlayerGroup(" ")
+            assertEquals("Enter a name for this player group.", viewModel.uiState.value.playerGroupErrorMessage)
+            viewModel.savePlayerGroup("Whole home", listOf("aa:bb"))
+            assertEquals(
+                "Select at least two connected players to save a group.",
+                viewModel.uiState.value.playerGroupErrorMessage
+            )
+            viewModel.savePlayerGroup("Whole home", listOf("aa:bb", "ee:ff"))
+            assertEquals(
+                "Only connected players can be saved in a group.",
+                viewModel.uiState.value.playerGroupErrorMessage
+            )
+            viewModel.selectPlayerGroup("missing")
+            assertEquals(
+                "This saved player group is no longer available.",
+                viewModel.uiState.value.playerGroupErrorMessage
+            )
+            viewModel.savePlayerGroup(
+                "Missing group",
+                listOf("aa:bb", "cc:dd"),
+                groupId = "missing"
+            )
+            advanceUntilIdle()
+            assertEquals(
+                "This saved player group no longer exists.",
+                viewModel.uiState.value.playerGroupErrorMessage
+            )
+            viewModel.removePlayerGroup("missing")
+            advanceUntilIdle()
+            assertEquals(
+                "This saved player group no longer exists.",
+                viewModel.uiState.value.playerGroupErrorMessage
+            )
+        }
+    }
+
+    @Test
+    fun restoringLegacyLastSessionPreservesItsCurrentSyncGroupAndLeader() {
+        runViewModelTest {
+            val players = listOf(
+                LmsPlayer("aa:bb", "Living Room", "Squeezebox", true, true),
+                LmsPlayer("cc:dd", "Kitchen", "Squeezebox", true, true)
+            )
+            val liveGroup = linkedSetOf("cc:dd", "aa:bb")
+            var syncCommandCount = 0
+            var unsyncCommandCount = 0
+            val remoteGateway = object : TestPlayerRemoteGateway() {
+                override suspend fun getSyncGroupMembers(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = liveGroup.toList()
+
+                override suspend fun syncPlayers(
+                    connection: LmsServerConnection,
+                    leaderPlayerId: String,
+                    memberPlayerId: String
+                ) {
+                    syncCommandCount++
+                }
+
+                override suspend fun unsyncPlayer(connection: LmsServerConnection, playerId: String) {
+                    unsyncCommandCount++
+                }
+            }
+            val activePlayerStore = LmsActivePlayerStore()
+            val viewModel = ConnectionViewModel(
+                LmsConnectionGateway { LmsServerInfo("9.2.0", players.size) },
+                LmsPlayerDirectory { players },
+                remoteGateway,
+                activePlayerStore
+            )
+            viewModel.onHostChanged("lms.local")
+            viewModel.testConnection()
+            advanceUntilIdle()
+            var restored = false
+            var failed = false
+
+            viewModel.restorePlayerSelection(
+                playerId = "aa:bb",
+                playerIds = emptyList(),
+                onApplied = { restored = true },
+                onFailure = { failed = true }
+            )
+            advanceUntilIdle()
+
+            assertTrue(restored)
+            assertFalse(failed)
+            assertEquals(0, syncCommandCount)
+            assertEquals(0, unsyncCommandCount)
+            assertEquals("aa:bb", activePlayerStore.activePlayer.value?.playerId)
+            assertEquals(setOf("aa:bb", "cc:dd"), activePlayerStore.activePlayer.value?.selectedPlayerIds?.toSet())
+        }
+    }
+
     private abstract class TestPlayerRemoteGateway : LmsPlayerRemoteGateway {
         override suspend fun getPlayerStatus(
             connection: LmsServerConnection,
             playerId: String
         ): LmsPlayerStatus = error("Unexpected player status request")
+
+        override suspend fun getSyncGroupMembers(
+            connection: LmsServerConnection,
+            playerId: String
+        ): List<String> = listOf(playerId)
+
+        override suspend fun syncPlayers(
+            connection: LmsServerConnection,
+            leaderPlayerId: String,
+            memberPlayerId: String
+        ) = Unit
+
+        override suspend fun unsyncPlayer(connection: LmsServerConnection, playerId: String) = Unit
 
         override suspend fun getPlayerMixerState(
             connection: LmsServerConnection,
@@ -926,13 +1332,16 @@ class ConnectionViewModelTest {
         testConnection()
     }
 
-    private class FakeSavedServerRepository : SavedServerRepository {
+    private class FakeSavedServerRepository(
+        private val saveFailure: Exception? = null
+    ) : SavedServerRepository {
         private val connections = mutableMapOf<String, LmsServerConnection>()
         private val profiles = MutableStateFlow<List<SavedServerProfile>>(emptyList())
 
         override fun observeServers(): Flow<List<SavedServerProfile>> = profiles
 
         override suspend fun save(connection: LmsServerConnection): SavedServerProfile {
+            saveFailure?.let { throw it }
             val normalizedHost = connection.host.trim()
             val existingProfile = profiles.value.firstOrNull {
                 it.host.equals(normalizedHost, ignoreCase = true) &&
@@ -957,6 +1366,51 @@ class ConnectionViewModelTest {
         override suspend fun remove(id: String) {
             connections.remove(id)
             profiles.value = profiles.value.filterNot { it.id == id }
+        }
+    }
+
+    private class FakePlayerGroupRepository : PlayerGroupRepository {
+        private val groups = MutableStateFlow<List<SavedLmsPlayerGroup>>(emptyList())
+
+        override fun observeGroups(endpointKey: String): Flow<List<SavedLmsPlayerGroup>> =
+            groups.map { savedGroups -> savedGroups.filter { it.endpointKey == endpointKey } }
+
+        override suspend fun saveGroup(
+            endpointKey: String,
+            name: String,
+            playerIds: List<String>
+        ): SavedLmsPlayerGroup {
+            val group = SavedLmsPlayerGroup(
+                id = "group-${groups.value.size + 1}",
+                endpointKey = endpointKey,
+                name = name,
+                playerIds = playerIds
+            )
+            groups.value = groups.value + group
+            return group
+        }
+
+        override suspend fun updateGroup(
+            endpointKey: String,
+            groupId: String,
+            name: String,
+            playerIds: List<String>
+        ): Boolean {
+            val group = groups.value.firstOrNull {
+                it.id == groupId && it.endpointKey == endpointKey
+            } ?: return false
+            groups.value = groups.value.map {
+                if (it.id == groupId) group.copy(name = name, playerIds = playerIds) else it
+            }
+            return true
+        }
+
+        override suspend fun removeGroup(endpointKey: String, groupId: String): Boolean {
+            val group = groups.value.firstOrNull {
+                it.id == groupId && it.endpointKey == endpointKey
+            } ?: return false
+            groups.value = groups.value - group
+            return true
         }
     }
 

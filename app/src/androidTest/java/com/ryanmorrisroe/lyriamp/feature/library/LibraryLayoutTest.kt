@@ -416,6 +416,19 @@ class LibraryLayoutTest {
                     canSeek = true
                 )
 
+            override suspend fun getSyncGroupMembers(
+                connection: LmsServerConnection,
+                playerId: String
+            ) = listOf(playerId)
+
+            override suspend fun syncPlayers(
+                connection: LmsServerConnection,
+                leaderPlayerId: String,
+                memberPlayerId: String
+            ) = Unit
+
+            override suspend fun unsyncPlayer(connection: LmsServerConnection, playerId: String) = Unit
+
             override suspend fun getPlayerQueue(
                 connection: LmsServerConnection,
                 playerId: String,

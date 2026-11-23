@@ -2,6 +2,7 @@ package com.ryanmorrisroe.lyriamp.feature.player
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -29,6 +30,7 @@ import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
 import com.ryanmorrisroe.lyriamp.ui.theme.LyriampTheme
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -98,6 +100,12 @@ class NowPlayingScreenTest {
         compose.onNodeWithContentDescription("Remove Next Track from queue").assertExists()
         compose.onNodeWithText("Up").assertDoesNotExist()
         compose.onNodeWithText("Down").assertDoesNotExist()
+        val dragHandleBounds = compose.onNodeWithContentDescription(
+            "Drag Next Track to reorder"
+        ).fetchSemanticsNode().boundsInRoot
+        val artworkBounds = compose.onNodeWithTag("queue-artwork-1")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(dragHandleBounds.right <= artworkBounds.left)
         compose.onNodeWithContentDescription("Drag Next Track to reorder")
             .performTouchInput {
                 down(center)
@@ -150,6 +158,19 @@ class NowPlayingScreenTest {
             playlistIndex = 0,
             trackId = "current"
         )
+
+        override suspend fun getSyncGroupMembers(
+            connection: LmsServerConnection,
+            playerId: String
+        ) = listOf(playerId)
+
+        override suspend fun syncPlayers(
+            connection: LmsServerConnection,
+            leaderPlayerId: String,
+            memberPlayerId: String
+        ) = Unit
+
+        override suspend fun unsyncPlayer(connection: LmsServerConnection, playerId: String) = Unit
 
         override suspend fun getPlayerQueue(
             connection: LmsServerConnection,

@@ -135,13 +135,23 @@ fun LyriampAppNavigation(
                                 popUpTo(RESTORING_ROUTE) { inclusive = true }
                             }
                         } else {
-                            restoreLibrary(snapshot)
-                            pendingRestore = null
-                            connectionViewModel.selectPlayer(player.id)
-                            navController.navigate(LIBRARY_ROUTE) {
-                                popUpTo(RESTORING_ROUTE) { inclusive = true }
-                                launchSingleTop = true
-                            }
+                            connectionViewModel.restorePlayerSelection(
+                                playerId = player.id,
+                                playerIds = snapshot.selectedPlayerIds,
+                                onApplied = {
+                                    restoreLibrary(snapshot)
+                                    pendingRestore = null
+                                    navController.navigate(LIBRARY_ROUTE) {
+                                        popUpTo(RESTORING_ROUTE) { inclusive = true }
+                                        launchSingleTop = true
+                                    }
+                                },
+                                onFailure = {
+                                    navController.navigate("$PLAYER_SELECTION_ROUTE?$ORIGIN_ARGUMENT=restore") {
+                                        popUpTo(RESTORING_ROUTE) { inclusive = true }
+                                    }
+                                }
+                            )
                         }
                     }
                 )
@@ -264,6 +274,7 @@ fun LyriampAppNavigation(
                         val snapshot = LastSessionSnapshot(
                             serverProfileId = profileId,
                             playerId = player.playerId,
+                            selectedPlayerIds = player.selectedPlayerIds,
                             locationStack = locations.map { location ->
                                 LastSessionLocation(location.title, location.query, location.filter)
                             },
@@ -379,8 +390,14 @@ private fun RestoreLastSessionScreen(
         if (hasNetworkPermission && !hasStartedRestore) {
             hasStartedRestore = true
             if (connectionViewModel.connectSavedServer(snapshot.serverProfileId)) {
+                val connectedIds = connectionViewModel.uiState.value.players
+                    .filter(LmsPlayer::connected)
+                    .map(LmsPlayer::id)
+                    .toSet()
+                val requiredIds = snapshot.selectedPlayerIds.ifEmpty { listOf(snapshot.playerId) }
                 val player = connectionViewModel.uiState.value.players.firstOrNull {
-                    it.id == snapshot.playerId && it.connected
+                    it.id == snapshot.playerId && it.connected &&
+                        requiredIds.all(connectedIds::contains)
                 }
                 onConnected(player)
             } else {

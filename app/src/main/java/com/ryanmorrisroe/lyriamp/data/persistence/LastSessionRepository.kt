@@ -32,6 +32,7 @@ data class LastSessionSnapshot(
     val playerId: String,
     val locationStack: List<LastSessionLocation>,
     val searchText: String,
+    val selectedPlayerIds: List<String> = emptyList(),
     val scrollAnchor: LastSessionScrollAnchor? = null,
     val activeTab: String? = null,
     val lastVisitedTab: String? = null,
@@ -77,6 +78,9 @@ class DataStoreLastSessionRepository(
         put("version", VERSION)
         put("serverProfileId", snapshot.serverProfileId)
         put("playerId", snapshot.playerId)
+        put("selectedPlayerIds", buildJsonArray {
+            snapshot.selectedPlayerIds.forEach { add(JsonPrimitive(it)) }
+        })
         put("searchText", snapshot.searchText)
         put("locations", encodeLocations(snapshot.locationStack))
         snapshot.scrollAnchor?.let { put("scrollAnchor", encodeAnchor(it)) }
@@ -131,6 +135,9 @@ class DataStoreLastSessionRepository(
         LastSessionSnapshot(
             serverProfileId = serverProfileId,
             playerId = playerId,
+            selectedPlayerIds = root["selectedPlayerIds"]?.jsonArray?.map { element ->
+                requireNotNull(element.jsonPrimitive.contentOrNull)
+            }.orEmpty(),
             locationStack = locations,
             searchText = root.string("searchText").orEmpty(),
             scrollAnchor = scroll,

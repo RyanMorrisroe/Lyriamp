@@ -109,6 +109,7 @@ import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
 import com.ryanmorrisroe.lyriamp.ui.artwork.LmsArtworkImage
+import com.ryanmorrisroe.lyriamp.ui.glyph.BackArrowIcon
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import java.io.IOException
 import kotlinx.coroutines.delay
@@ -294,8 +295,7 @@ fun LibraryScreen(
                                 contentDescription = "Back"
                             }
                         ) {
-                            LibraryGlyphIcon(
-                                LibraryGlyph.BACK,
+                            BackArrowIcon(
                                 MaterialTheme.colorScheme.onSurface,
                                 Modifier.size(24.dp)
                             )
@@ -1025,7 +1025,6 @@ private fun LibraryLayoutSelector(
 }
 
 private enum class LibraryGlyph {
-    BACK,
     CLOSE,
     COMPACT,
     COMFORTABLE,
@@ -1077,11 +1076,6 @@ private fun LibraryGlyphIcon(
         }
 
         when (glyph) {
-            LibraryGlyph.BACK -> {
-                line(19f, 12f, 5f, 12f)
-                line(5f, 12f, 11f, 6f)
-                line(5f, 12f, 11f, 18f)
-            }
             LibraryGlyph.CLOSE -> {
                 line(6f, 6f, 18f, 18f)
                 line(18f, 6f, 6f, 18f)

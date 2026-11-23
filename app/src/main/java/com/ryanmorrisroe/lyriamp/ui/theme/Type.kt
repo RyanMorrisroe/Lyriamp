@@ -1,34 +1,30 @@
 package com.ryanmorrisroe.lyriamp.ui.theme
 
-import androidx.compose.material3.Typography
+import androidx.compose.material3.Typography as MaterialTypography
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 
-// Set of Material typography styles to start with
-val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
-    )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
+private val baseTypography = MaterialTypography()
+
+private fun TextStyle.tightened(): TextStyle = copy(
+    fontSize = fontSize * 0.94f,
+    lineHeight = lineHeight * 0.94f,
+    letterSpacing = letterSpacing * 0.8f
+)
+
+val Typography = baseTypography.copy(
+    displayLarge = baseTypography.displayLarge.tightened(),
+    displayMedium = baseTypography.displayMedium.tightened(),
+    displaySmall = baseTypography.displaySmall.tightened(),
+    headlineLarge = baseTypography.headlineLarge.tightened(),
+    headlineMedium = baseTypography.headlineMedium.tightened(),
+    headlineSmall = baseTypography.headlineSmall.tightened(),
+    titleLarge = baseTypography.titleLarge.tightened(),
+    titleMedium = baseTypography.titleMedium.tightened(),
+    titleSmall = baseTypography.titleSmall.tightened(),
+    bodyLarge = baseTypography.bodyLarge.tightened(),
+    bodyMedium = baseTypography.bodyMedium.tightened(),
+    bodySmall = baseTypography.bodySmall.tightened(),
+    labelLarge = baseTypography.labelLarge.tightened(),
+    labelMedium = baseTypography.labelMedium.tightened(),
+    labelSmall = baseTypography.labelSmall.tightened()
 )

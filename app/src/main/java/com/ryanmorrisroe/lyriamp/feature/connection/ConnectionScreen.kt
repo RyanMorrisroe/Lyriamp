@@ -297,8 +297,7 @@ fun ConnectionScreen(viewModel: ConnectionViewModel, onPlayerSelected: () -> Uni
                         state.players.forEach { player ->
                             ListItem(
                                 modifier = Modifier.clickable(enabled = player.connected) {
-                                    viewModel.selectPlayer(player.id)
-                                    onPlayerSelected()
+                                    viewModel.selectPlayer(player.id, onPlayerSelected)
                                 },
                                 headlineContent = { Text(player.name) },
                                 supportingContent = {
