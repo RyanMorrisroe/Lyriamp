@@ -37,7 +37,8 @@ class MainActivity : ComponentActivity() {
             app.playerDirectory,
             app.playerRemoteGateway,
             app.activePlayerStore,
-            app.savedServerRepository
+            app.savedServerRepository,
+            app.playerGroupRepository
         )
     }
 

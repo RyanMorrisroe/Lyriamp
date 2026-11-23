@@ -2,18 +2,19 @@
 
 Lyriamp is a native Android remote controller for [Lyrion Music Server (LMS)](https://lyrion.org/). The app sends LMS JSON-RPC commands to a server and controls its connected players; audio playback remains on those players.
 
-> **Project status:** Lyriamp connects to LMS, browses its media library, controls a selected player, and manages that player's upcoming queue. The current track stays fixed while upcoming items can be added, moved, or removed. Synchronized player groups are not implemented.
+> **Project status:** Lyriamp connects to LMS, browses its media library, controls selected players, and manages the active player's upcoming queue. Connected players can be grouped for synchronized playback, and named group presets are stored locally per server. The current track stays fixed while upcoming items can be added, moved, or removed.
 
 ## Features
 
 - Connect manually to an LMS server over HTTP or HTTPS, with optional username and password.
 - Automatically save a server profile after a successful connection and reconnect to saved profiles from the Connections screen.
-- List server players, inspect their connection and power state, select a connected player, and control player power.
+- List server players with their current track, select an individual player, build temporary groups by dragging rooms, and control player power.
+- Save named multi-player groups per LMS server, select them for synchronized playback, and delete presets without changing live sync.
 - Browse Home, artists, albums, genres, songs, and playlists in tabs with bounded infinite scrolling.
 - Choose artwork-grid, compact, or comfortable layouts for artists, albums, and genres; songs, playlists, and search offer compact and comfortable lists. Layout choices are remembered separately by type.
 - Search artists, albums, and tracks across the library, and view LMS artwork when available.
 - Choose light, dark, or system appearance under Settings; colors follow the device's Android palette.
-- Play a track, album, or playlist now on the selected LMS player; playback remains on that player.
+- Play a track, album, or playlist now on the selected LMS player group; playback remains on the LMS players.
 - Long-press a library item's Play action to add it to the queue end or play it next without replacing the current playlist.
 - Add playable tracks, albums, artists, genres, and playlists from the full-screen player's Library picker; playlist folders remain browse-only.
 - Review upcoming tracks, remove them, and move them up or down in the full queue. The current track cannot be edited.
@@ -23,14 +24,13 @@ Lyriamp is a native Android remote controller for [Lyrion Music Server (LMS)](ht
 - Play, pause, stop, skip tracks, and seek when supported by the player.
 - Set volume, mute, shuffle mode, and repeat mode.
 - Save server profiles locally. Credentials are encrypted with Android Keystore AES-GCM.
-- Restore the last server, player, active tab, search, and per-tab browse locations and positions on launch when available. If the saved player is unavailable, choose another connected player.
+- Restore the last server, selected player group, active tab, search, and per-tab browse locations and positions on launch when available. If a saved group is unavailable, choose connected players again.
 - Switch players without leaving the current library location.
 - Expose the selected LMS player through an Android Media3 media session. Media-session transport commands are forwarded to LMS; the app does not decode or render audio.
 
 ## Not Yet Implemented
 
 - Saved queues.
-- LMS-synchronized groups or locally saved multi-player sets.
 - Automatic server discovery or remote/cloud access.
 
 ## Requirements
@@ -45,7 +45,7 @@ No LMS version compatibility matrix has been published yet. A reachable LMS serv
 
 1. From Connections, choose **Add server** and enter a hostname or IP address without a scheme or path. The default port is `9000`; change it if your LMS server uses another port.
 2. Choose HTTP or HTTPS, enter LMS credentials if authentication is enabled, and connect. On API 37, grant local-network access when Android prompts for it. Successful connections are saved as profiles.
-3. Select a connected player to open the library. Choose a tab or search artists, albums, and tracks. Use the layout controls in each view to choose how to browse. Select a track or use an album or playlist's **Play** action to replace the current playlist and start playback. Long-press **Play** to add the item to the queue end or play it next.
+3. On the Players screen, select a connected room or saved group, or build a temporary group by dragging rooms into the current selection. Choose **Control** to open the library. Select a track or use an album or playlist's **Play** action to replace the current playlist and start playback. Long-press **Play** to add the item to the queue end or play it next.
 4. Use the player strip for transport and seek controls. Open the track details for full-screen Now Playing, including volume, shuffle, repeat, and the upcoming queue. Use **+ Add** to pick more library items, **Full queue** to reorder or remove upcoming tracks, and the artist or album details to browse the library. Change players without losing the current library location; use **Settings → Connections** to switch servers and **Settings → Display** to change appearance.
 5. Select a saved server profile to reconnect immediately. On later launches, Lyriamp restores the last session automatically when its server and player are available. The saved-session snapshot contains no credentials.
 

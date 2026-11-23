@@ -1,0 +1,945 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lyriamp — player management concept</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #101015;
+      color: #f7f4f4;
+      --muted: #aaa4ad;
+      --line: #39343d;
+      --accent: #e6b487;
+      --accent-strong: #f2c99e;
+      --screen: #19171c;
+      --panel: #242127;
+      --green: #8fc19b;
+      --danger: #e08c87;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-width: 320px;
+      margin: 0;
+      background:
+        radial-gradient(ellipse at 70% 0, #3e302932, transparent 42%),
+        #101015;
+    }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, [draggable="true"]:focus-visible {
+      outline: 2px solid var(--accent-strong);
+      outline-offset: 3px;
+    }
+    .page { max-width: 1320px; margin: auto; padding: 48px 32px 72px; }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 10px 0 12px; font-size: clamp(32px, 4vw, 52px); letter-spacing: -.05em; }
+    .intro { max-width: 760px; margin: 0; color: #aca8b1; line-height: 1.65; }
+    .concept-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin: 18px 0 32px;
+      padding: 10px 13px;
+      border: 1px solid #39343a;
+      border-radius: 9px;
+      color: #c9c2c3;
+      font-size: 12px;
+    }
+    .concept-note::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      content: "";
+    }
+    .layout { display: grid; grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); gap: 48px; align-items: start; }
+    .preview { min-width: 0; }
+    .preview-label { margin: 0 0 12px; color: var(--accent); font-size: 11px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+    .phone {
+      position: relative;
+      display: flex;
+      width: 100%;
+      height: min(840px, calc(100vh - 60px));
+      min-height: 690px;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid #514951;
+      border-radius: 34px;
+      background: var(--screen);
+      box-shadow: 0 24px 70px #0008, inset 0 0 0 4px #211e24;
+    }
+    .status-bar { display: flex; height: 42px; flex: 0 0 42px; justify-content: space-between; align-items: end; padding: 0 24px 7px; font-size: 11px; font-weight: 700; }
+    .status-icons { color: #e8ddd7; letter-spacing: 3px; }
+    .app-scroll { min-height: 0; flex: 1; overflow-y: auto; padding: 0 18px 20px; scrollbar-width: thin; scrollbar-color: #514751 transparent; }
+    .app-bar { display: flex; height: 50px; justify-content: space-between; align-items: center; }
+    .app-title { display: flex; align-items: center; gap: 9px; font-size: 16px; font-weight: 750; letter-spacing: -.02em; }
+    .back { color: var(--accent); font-size: 22px; line-height: 1; }
+    .server-summary { padding: 13px 14px; border: 1px solid #403943; border-radius: 14px; background: #211e24; }
+    .server-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .server-label { color: #a9a0a9; font-size: 9px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
+    .connected { display: inline-flex; align-items: center; gap: 6px; color: #acd0b2; font-size: 9px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+    .connected::before { width: 6px; height: 6px; border-radius: 50%; background: var(--green); content: ""; }
+    .server-name { margin-top: 5px; font-size: 14px; font-weight: 700; }
+    .server-details { margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 22px 0 10px; }
+    .section-heading h2 { margin: 0; font-size: 13px; letter-spacing: -.01em; }
+    .section-heading small { color: var(--muted); font-size: 10px; }
+    .preset-list { display: grid; gap: 8px; }
+    .preset-row { display: flex; min-width: 0; align-items: stretch; gap: 7px; }
+    .preset-row.delete-visible .preset { border-color: #806059; }
+    .preset {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 11px 12px;
+      border: 1px solid #403943;
+      border-radius: 12px;
+      background: #211e24;
+      color: #f7f4f4;
+      text-align: left;
+      user-select: none;
+      transition: border-color .16s ease, background .16s ease;
+    }
+    .preset:hover { border-color: #6b5c54; }
+    .preset.active { border-color: #b98f70; background: #332b2a; }
+    .preset-copy { min-width: 0; }
+    .preset-name { display: block; font-size: 12px; font-weight: 700; }
+    .preset-members { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .preset-count { flex: 0 0 auto; color: #e5c4aa; font-size: 10px; font-weight: 700; }
+    .preset-options { display: flex; align-items: stretch; gap: 7px; }
+    .preset-options[hidden] { display: none; }
+    .edit-preset-option, .delete-preset-option {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 13px;
+      border: 1px solid;
+      border-radius: 11px;
+      font-size: 10px;
+      font-weight: 750;
+    }
+    .edit-preset-option { border-color: #625047; background: #302823; color: #edc3a2; }
+    .delete-preset-option { border-color: #744744; background: #392729; color: #f0b5ae; }
+    .edit-preset-option:hover { border-color: #9c785e; background: #40332f; }
+    .delete-preset-option:hover { border-color: #ad6d67; background: #4a2e30; }
+    .empty-presets { padding: 12px; border: 1px dashed #49414a; border-radius: 11px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .build-button {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 9px;
+      padding: 10px 12px;
+      border: 1px solid #625047;
+      border-radius: 11px;
+      background: transparent;
+      color: #f0c7a6;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .build-button:hover { background: #302823; }
+    .plus { font-size: 16px; line-height: 1; }
+    .selection-banner { margin-top: 17px; padding: 12px 13px; border: 1px solid transparent; border-radius: 12px; background: #302b32; transition: border-color .16s ease, background .16s ease; }
+    .selection-banner.is-over { border-color: var(--accent-strong); background: #40332f; }
+    .selection-label { color: #a9a0a9; font-size: 9px; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
+    .selection-main { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-top: 5px; }
+    .selection-main strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .selection-main span { flex: 0 0 auto; color: #e5c4aa; font-size: 10px; font-weight: 700; }
+    .selection-members { margin-top: 4px; color: #b9b0b8; font-size: 9px; line-height: 1.45; }
+    .selection-drop-hint { margin-top: 8px; color: #dfb898; font-size: 9px; font-weight: 650; }
+    .room-intro { margin: 19px 0 9px; }
+    .room-intro h2 { margin: 0; font-size: 13px; }
+    .room-intro p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+    .room-list { display: grid; gap: 8px; }
+    .room-drag-row { min-width: 0; }
+    .room-drag-row[draggable="true"] { cursor: grab; }
+    .room-drag-row[draggable="true"]:active { cursor: grabbing; }
+    .room-select {
+      display: flex;
+      width: 100%;
+      min-width: 0;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid #3d3740;
+      border-radius: 12px;
+      background: #211e24;
+      color: inherit;
+      text-align: left;
+      transition: border-color .16s ease, background .16s ease;
+    }
+    .room-select:hover { border-color: #61554f; }
+    .room-select.selected { border-color: #b98f70; background: #2e2828; }
+    .room-select:disabled { cursor: not-allowed; opacity: .58; }
+    .room-select:disabled:hover { border-color: #3d3740; }
+    .room-art {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      place-items: center;
+      border-radius: 10px;
+      color: #282124;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .room-art.sand { background: linear-gradient(145deg, #edc49f, #a16d63); }
+    .room-art.blue { background: linear-gradient(145deg, #93b4b1, #3b6973); color: #17252a; }
+    .room-art.green { background: linear-gradient(145deg, #c0c29a, #63756a); color: #202821; }
+    .room-art.rose { background: linear-gradient(145deg, #dfa9a0, #7a5362); color: #291d25; }
+    .room-copy { min-width: 0; flex: 1; }
+    .room-name-line { display: flex; align-items: center; gap: 6px; }
+    .room-name { overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .room-status { flex: 0 0 auto; color: #a8c9ae; font-size: 8px; font-weight: 700; }
+    .room-status.offline { color: #a29aa3; }
+    .room-track { display: block; overflow: hidden; margin-top: 4px; color: #c0b7bf; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .room-device { display: block; overflow: hidden; margin-top: 3px; color: #8e8690; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    .selection-mark { display: grid; width: 19px; height: 19px; flex: 0 0 19px; place-items: center; border: 1px solid #625c65; border-radius: 50%; color: transparent; font-size: 11px; }
+    .room-select.selected .selection-mark { border-color: var(--accent); background: var(--accent); color: #211b1c; }
+    .primary-action {
+      width: 100%;
+      margin-top: 14px;
+      padding: 12px 14px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--accent-strong);
+      color: #211b1c;
+      font-size: 12px;
+      font-weight: 800;
+      box-shadow: 0 7px 22px #e6b48720;
+    }
+    .primary-action:hover { background: #f8d3ad; }
+    .screen-hidden { display: none !important; }
+    .builder-lead { margin: 2px 0 13px; color: #b7aeb6; font-size: 10px; line-height: 1.5; }
+    .builder-name { display: grid; gap: 6px; margin-bottom: 12px; color: #b8afb7; font-size: 9px; font-weight: 700; }
+    .builder-name input, .dialog-input {
+      width: 100%;
+      padding: 10px 11px;
+      border: 1px solid #4b424b;
+      border-radius: 9px;
+      background: #17151a;
+      color: #f7f4f4;
+      font-size: 11px;
+    }
+    .drop-section { margin-top: 11px; }
+    .drop-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; color: #ded5db; font-size: 10px; font-weight: 750; }
+    .drop-heading span:last-child { color: var(--muted); font-size: 9px; font-weight: 500; }
+    .drop-zone {
+      min-height: 83px;
+      padding: 8px;
+      border: 1px dashed #5a4d50;
+      border-radius: 12px;
+      background: #1f1b21;
+      transition: border-color .15s ease, background .15s ease;
+    }
+    .drop-zone.is-over { border-color: var(--accent-strong); background: #352c2a; }
+    .drop-hint { padding: 10px 5px; color: #8f8790; font-size: 9px; line-height: 1.45; text-align: center; }
+    .builder-room {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 6px;
+      padding: 7px;
+      border: 1px solid #403943;
+      border-radius: 9px;
+      background: #29252c;
+      cursor: grab;
+    }
+    .builder-room:last-child { margin-bottom: 0; }
+    .builder-room:active { cursor: grabbing; }
+    .builder-room .room-art { width: 30px; height: 30px; flex-basis: 30px; border-radius: 8px; font-size: 8px; }
+    .builder-room-copy { min-width: 0; flex: 1; }
+    .builder-room-copy strong, .builder-room-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .builder-room-copy strong { font-size: 9px; }
+    .builder-room-copy small { margin-top: 3px; color: var(--muted); font-size: 8px; }
+    .move-button {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      place-items: center;
+      border: 1px solid #514751;
+      border-radius: 8px;
+      background: #332e36;
+      color: #e7c2a8;
+      font-size: 15px;
+    }
+    .builder-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+    .secondary-action {
+      min-width: 0;
+      padding: 10px 8px;
+      border: 1px solid #625047;
+      border-radius: 10px;
+      background: transparent;
+      color: #edc3a2;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .secondary-action.primary { border-color: transparent; background: var(--accent-strong); color: #211b1c; }
+    .secondary-action:disabled { cursor: not-allowed; opacity: .45; }
+    .toast {
+      position: absolute;
+      z-index: 3;
+      right: 12px;
+      bottom: 12px;
+      left: 12px;
+      width: fit-content;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 9px 12px;
+      border: 1px solid #5b5148;
+      border-radius: 999px;
+      background: #36302e;
+      color: #f4e3d6;
+      font-size: 9px;
+      box-shadow: 0 8px 26px #0007;
+    }
+    dialog {
+      width: min(330px, calc(100% - 34px));
+      padding: 18px;
+      border: 1px solid #544953;
+      border-radius: 17px;
+      background: #211e24;
+      color: #f7f4f4;
+      box-shadow: 0 20px 70px #000a;
+    }
+    dialog::backdrop { background: #09080bbd; backdrop-filter: blur(3px); }
+    dialog h2 { margin: 0; font-size: 17px; }
+    dialog p { margin: 7px 0 14px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+    .dialog-actions button { padding: 9px 11px; border: 1px solid #514751; border-radius: 9px; background: transparent; color: #ded5db; font-size: 10px; font-weight: 700; }
+    .dialog-actions button[type="submit"] { border-color: transparent; background: var(--accent-strong); color: #211b1c; }
+    .dialog-actions button.danger { border-color: #744744; background: #623b39; color: #fff0ed; }
+    .notes { padding-top: 7px; }
+    .notes h2 { margin: 0 0 7px; font-size: 23px; letter-spacing: -.035em; }
+    .notes-intro { max-width: 600px; margin: 0 0 22px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .flow-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+    .flow-card, .api-card { padding: 16px; border: 1px solid #39343d; border-radius: 14px; background: #1a181e; }
+    .flow-number { color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+    .flow-card h3 { margin: 6px 0 6px; font-size: 13px; }
+    .flow-card p { margin: 0; color: #aaa2aa; font-size: 11px; line-height: 1.55; }
+    .api-card { margin-top: 12px; }
+    .api-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .api-heading h3 { margin: 0; font-size: 14px; }
+    .api-heading span { color: #9c929c; font-size: 9px; }
+    .api-card p { margin: 8px 0 10px; color: #aaa2aa; font-size: 10px; line-height: 1.55; }
+    pre {
+      overflow-x: auto;
+      margin: 9px 0;
+      padding: 11px 12px;
+      border: 1px solid #38333b;
+      border-radius: 9px;
+      background: #121116;
+      color: #e9c5a6;
+      font: 10px/1.55 "Cascadia Code", Consolas, monospace;
+      scrollbar-width: thin;
+    }
+    .api-note { padding: 10px 11px; border-left: 2px solid #a87e61; background: #262126; color: #c2b9c0; font-size: 10px; line-height: 1.55; }
+    .sources { margin: 13px 0 0; color: #948b94; font-size: 10px; line-height: 1.7; }
+    .sources a { color: #d7b79e; text-decoration-color: #8b6a53; text-underline-offset: 3px; }
+    .footer { margin-top: 40px; padding-top: 19px; border-top: 1px solid #373039; color: #938a93; font-size: 10px; line-height: 1.6; }
+    @media (max-width: 920px) {
+      .layout { grid-template-columns: minmax(320px, 390px) minmax(0, 1fr); gap: 28px; }
+      .phone { height: min(820px, calc(100vh - 40px)); }
+      .flow-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 740px) {
+      .page { padding: 30px 18px 48px; }
+      .layout { grid-template-columns: 1fr; gap: 32px; }
+      .phone { width: min(100%, 410px); height: 820px; max-height: 88vh; min-height: 670px; margin: 0 auto; }
+      .notes { max-width: 600px; margin: auto; }
+      .flow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 430px) {
+      .page { padding-right: 12px; padding-left: 12px; }
+      .phone { border-radius: 29px; }
+      .app-scroll { padding-right: 14px; padding-left: 14px; }
+      .flow-grid { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="eyebrow">Lyriamp · player management exploration</div>
+    <h1>One tap for any room.</h1>
+    <p class="intro">A player picker for choosing one room, recalling a named multi-room group, or arranging a temporary group. Each room shows its current track before you select it.</p>
+    <div class="concept-note">Interactive concept only · selections and drag actions are local mock behavior</div>
+
+    <div class="layout">
+      <section class="preview" aria-label="Interactive player management mockup">
+        <p class="preview-label">Player selection · tap a group or room</p>
+        <div class="phone">
+          <div class="status-bar"><span>9:41</span><span class="status-icons">◈ ▰</span></div>
+          <div class="app-scroll">
+            <header class="app-bar">
+              <div class="app-title"><span class="back" aria-hidden="true">‹</span><span id="screenTitle">Players</span></div>
+              <span class="connected">Connected</span>
+            </header>
+
+            <section id="browseView">
+              <div class="server-summary">
+                <div class="server-line">
+                  <span class="server-label">Current LMS server</span>
+                  <span class="connected">4 players</span>
+                </div>
+                <div class="server-name">Den · Lyrion Music Server</div>
+                <div class="server-details">lms.home · HTTP · Port 9000</div>
+              </div>
+
+              <div class="section-heading">
+                <h2>Saved groups</h2>
+                <small>Tap to select · hold for options</small>
+              </div>
+              <div id="presetList" class="preset-list"></div>
+              <button id="buildGroupButton" class="build-button" type="button">
+                <span class="plus" aria-hidden="true">+</span> Build a room group
+              </button>
+
+              <div id="selectionBanner" class="selection-banner" data-dropzone="selection" aria-label="Current selection. Drop a connected player here to add it." aria-live="polite">
+                <div class="selection-label">Current selection</div>
+                <div class="selection-main"><strong id="selectionName"></strong><span id="selectionCount"></span></div>
+                <div id="selectionMembers" class="selection-members"></div>
+                <div class="selection-drop-hint">Drag another player here to add it</div>
+              </div>
+
+              <div class="room-intro">
+                <h2>Players</h2>
+                <p>Tap to select one room, or drag a player up to the current selection to add it.</p>
+              </div>
+              <div id="roomList" class="room-list"></div>
+              <button id="controlButton" class="primary-action" type="button"></button>
+            </section>
+
+            <section id="builderView" class="screen-hidden" aria-label="Room group builder">
+              <div class="server-summary">
+                <div class="server-line"><span class="server-label">Build a group</span><span class="connected">Live preview</span></div>
+                <div class="server-name">Drag rooms in or out</div>
+                <div class="server-details">Drop a room into either list, or use the + / − buttons.</div>
+              </div>
+              <p class="builder-lead">This changes the draft only. Use the group to start syncing, or save it as a reusable preset. Offline rooms cannot be added.</p>
+              <label class="builder-name" for="draftName">
+                GROUP NAME
+                <input id="draftName" type="text" maxlength="32" value="Room group" autocomplete="off">
+              </label>
+
+              <div class="drop-section">
+                <div class="drop-heading"><span>In this group</span><span id="draftCount">0 rooms</span></div>
+                <div id="groupDropZone" class="drop-zone" data-dropzone="group" aria-label="Drop players here to add them to the group"></div>
+              </div>
+              <div class="drop-section">
+                <div class="drop-heading"><span>Available rooms</span><span>Drag to add</span></div>
+                <div id="availableDropZone" class="drop-zone" data-dropzone="available" aria-label="Drop players here to remove them from the group"></div>
+              </div>
+
+              <div class="builder-actions">
+                <button id="savePresetButton" class="secondary-action" type="button">Save as preset</button>
+                <button id="useGroupButton" class="secondary-action primary" type="button">Use these rooms</button>
+              </div>
+              <button id="cancelBuilderButton" class="build-button" type="button">Cancel</button>
+            </section>
+            <div id="toast" class="toast screen-hidden" role="status"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="notes">
+        <h2>How the selection flow works</h2>
+        <p class="notes-intro">The same room list supports all three choices without hiding what is playing in each room. The builder is a draft until the user applies it.</p>
+        <div class="flow-grid">
+          <article class="flow-card">
+            <div class="flow-number">01 · RECALL</div>
+            <h3>Saved room groups</h3>
+            <p>Choose a named preset such as “Whole home” or “Downstairs,” or delete it from its row. Deleting a preset does not stop or unsync current players.</p>
+          </article>
+          <article class="flow-card">
+            <div class="flow-number">02 · ARRANGE</div>
+            <h3>Temporary group</h3>
+            <p>Drag a connected player onto Current selection to add it. Use the group builder to remove rooms or save the selection as a preset.</p>
+          </article>
+          <article class="flow-card">
+            <div class="flow-number">03 · SELECT</div>
+            <h3>One room or many</h3>
+            <p>Tap any individual room to switch to single-player control. The selection banner always names the active room or group.</p>
+          </article>
+          <article class="flow-card">
+            <div class="flow-number">04 · SCAN</div>
+            <h3>Track subtitles</h3>
+            <p>Show the current title and artist on every player row, with playback/connectivity state kept secondary and easy to scan.</p>
+          </article>
+        </div>
+
+        <section class="api-card">
+          <div class="api-heading">
+            <h3>LMS API notes</h3>
+            <span>JSON-RPC 1.0 · /jsonrpc.js</span>
+          </div>
+          <p>Requests use the existing <code>slim.request</code> wrapper. Global queries use player ID <code>0</code>; player-specific calls use the player ID returned by <code>players_loop</code>.</p>
+          <pre>POST /jsonrpc.js
+{"id":1,"method":"slim.request","params":["0",["players",0,100]]}</pre>
+          <p>For each connected player, request status with the current track fields. LMS returns the current queue item in <code>playlist_loop</code>; Lyriamp can fall back to <code>current_title</code>.</p>
+          <pre>{"id":1,"method":"slim.request","params":["&lt;player-id&gt;",["status","-",1,"tags:aclKN"]]}</pre>
+          <p>Live membership is queried from a player with <code>sync ?</code>; the response lists its group members, or <code>-</code> if it is solo. Add each member to a chosen leader with <code>sync</code>; unsync a room with <code>sync -</code>.</p>
+          <pre>{"id":1,"method":"slim.request","params":["&lt;player-id&gt;",["sync","?"]]}
+{"id":1,"method":"slim.request","params":["&lt;leader-id&gt;",["sync","&lt;member-id&gt;"]]}
+{"id":1,"method":"slim.request","params":["&lt;player-id&gt;",["sync","-"]]}</pre>
+          <div class="api-note">LMS exposes live sync membership, not named saved presets. A preset should be stored locally by Lyriamp and applied as a sequence of sync calls. When joining, LMS may move a member out of its previous sync group; verify the result with the player-specific <code>sync ?</code> query. LMS also provides <code>syncgroups ?</code> for a server-wide listing.</div>
+          <p class="sources">
+            References:
+            <a href="https://lyrion.org/reference/cli/using-the-cli/" target="_blank" rel="noreferrer">JSON-RPC request format</a>
+            ·
+            <a href="https://lyrion.org/reference/cli/players/" target="_blank" rel="noreferrer">players, sync, and syncgroups commands</a>
+          </p>
+        </section>
+      </aside>
+    </div>
+
+    <footer class="footer">Concept for the existing player-selection flow. No app source, persistence, network calls, or LMS player state are changed by this mockup.</footer>
+  </main>
+
+  <dialog id="saveDialog">
+    <form id="saveForm" method="dialog">
+      <h2>Save this group</h2>
+      <p>Keep this set of rooms as a reusable preset for the Den server.</p>
+      <label class="builder-name" for="presetName">GROUP NAME</label>
+      <input id="presetName" class="dialog-input" type="text" maxlength="32" required autocomplete="off">
+      <div class="dialog-actions">
+        <button id="closeDialogButton" type="button">Cancel</button>
+        <button type="submit">Save preset</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="deleteDialog">
+    <form id="deleteForm" method="dialog">
+      <h2>Delete saved group?</h2>
+      <p id="deletePrompt"></p>
+      <div class="dialog-actions">
+        <button id="cancelDeleteButton" type="button">Cancel</button>
+        <button class="danger" type="submit">Delete group</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    const players = [
+      { id: "living", name: "Living Room", device: "Squeezebox Touch · Connected", track: "Weightless", artist: "Arlo Parks", mode: "Playing", initials: "LR", color: "sand", connected: true },
+      { id: "kitchen", name: "Kitchen", device: "Squeezebox Radio · Connected", track: "Everywhere", artist: "Fleetwood Mac", mode: "Playing", initials: "KT", color: "blue", connected: true },
+      { id: "office", name: "Office", device: "Squeezebox Boom · Connected", track: "Breathe Deeper", artist: "Tame Impala", mode: "Playing", initials: "OF", color: "green", connected: true },
+      { id: "patio", name: "Patio", device: "Squeezebox Classic · Offline", track: "Playback unavailable", artist: "", mode: "Offline", initials: "PT", color: "rose", connected: false }
+    ];
+    const groups = [
+      { id: "whole-home", name: "Whole home", ids: ["living", "kitchen", "office"] },
+      { id: "downstairs", name: "Downstairs", ids: ["living", "kitchen"] }
+    ];
+    let selectedIds = [...groups[0].ids];
+    let selectedName = groups[0].name;
+    let selectedPresetId = groups[0].id;
+    let draftIds = new Set(selectedIds);
+    let draggedPlayerId = null;
+    let editingGroupId = null;
+    let pendingDeleteGroupId = null;
+    let longPressTimer = null;
+    let pressedPresetButton = null;
+    let presetPointerId = null;
+    let pressOrigin = null;
+    let suppressPresetClick = false;
+    let toastTimer;
+
+    const $ = (selector) => document.querySelector(selector);
+    const roomById = (id) => players.find((player) => player.id === id);
+    const roomNames = (ids) => ids.map((id) => roomById(id)?.name).filter(Boolean).join(" · ");
+
+    function renderPresets() {
+      $("#presetList").innerHTML = groups.length
+        ? groups.map((group) => `
+          <div class="preset-row">
+              <button class="preset ${group.id === selectedPresetId ? "active" : ""}" type="button" data-preset="${escapeHtml(group.id)}" aria-pressed="${group.id === selectedPresetId}" aria-expanded="false" aria-controls="group-options-${escapeHtml(group.id)}">
+              <span class="preset-copy">
+                <span class="preset-name">${escapeHtml(group.name)}</span>
+                <span class="preset-members">${escapeHtml(roomNames(group.ids))}</span>
+              </span>
+              <span class="preset-count">${group.ids.length} rooms</span>
+            </button>
+            <div id="group-options-${escapeHtml(group.id)}" class="preset-options" hidden>
+              <button class="edit-preset-option" type="button" data-edit-preset="${escapeHtml(group.id)}" aria-label="Edit saved group ${escapeHtml(group.name)}">Edit</button>
+              <button class="delete-preset-option" type="button" data-delete-preset="${escapeHtml(group.id)}" aria-label="Delete saved group ${escapeHtml(group.name)}">Delete</button>
+            </div>
+          </div>
+        `).join("")
+        : `<div class="empty-presets">No saved groups yet. Build a room group and save it here.</div>`;
+    }
+
+    function hideGroupOptions(exceptGroupId = null) {
+      $("#presetList").querySelectorAll(".preset-row.delete-visible").forEach((row) => {
+        const presetButton = row.querySelector("[data-preset]");
+        if (presetButton?.dataset.preset === exceptGroupId) return;
+        row.classList.remove("delete-visible");
+        const groupOptions = row.querySelector(".preset-options");
+        if (groupOptions) groupOptions.hidden = true;
+        presetButton?.setAttribute("aria-expanded", "false");
+      });
+    }
+
+    function revealGroupOptions(presetButton) {
+      const row = presetButton.closest(".preset-row");
+      const groupOptions = row?.querySelector(".preset-options");
+      if (!row || !groupOptions) return;
+      hideGroupOptions(presetButton.dataset.preset);
+      row.classList.add("delete-visible");
+      groupOptions.hidden = false;
+      presetButton.setAttribute("aria-expanded", "true");
+    }
+
+    function clearPendingPresetHold() {
+      window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+      pressedPresetButton = null;
+      presetPointerId = null;
+      pressOrigin = null;
+    }
+
+    function renderRooms() {
+      $("#roomList").innerHTML = players.map((player) => {
+        const selected = selectedIds.includes(player.id);
+        const statusClass = player.connected ? "" : " offline";
+        const subtitle = player.artist ? `${player.track} · ${player.artist}` : player.track;
+        return `
+          <div class="room-drag-row" data-room-id="${player.id}" draggable="${player.connected}">
+            <button class="room-select ${selected ? "selected" : ""}" type="button" data-player="${player.id}" aria-pressed="${selected}" ${player.connected ? "" : "disabled"}>
+              <span class="room-art ${player.color}" aria-hidden="true">${player.initials}</span>
+              <span class="room-copy">
+                <span class="room-name-line"><span class="room-name">${escapeHtml(player.name)}</span><span class="room-status${statusClass}">${player.mode}</span></span>
+                <span class="room-track">${escapeHtml(subtitle)}</span>
+                <span class="room-device">${escapeHtml(player.device)}</span>
+              </span>
+              <span class="selection-mark" aria-hidden="true">✓</span>
+            </button>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderSelection() {
+      $("#selectionName").textContent = selectedName;
+      $("#selectionCount").textContent = `${selectedIds.length} ${selectedIds.length === 1 ? "room" : "rooms"}`;
+      $("#selectionMembers").textContent = roomNames(selectedIds);
+      $("#controlButton").textContent = `Control ${selectedIds.length} ${selectedIds.length === 1 ? "room" : "rooms"}`;
+      renderPresets();
+      renderRooms();
+    }
+
+    function renderBuilder() {
+      const inGroup = players.filter((player) => draftIds.has(player.id));
+      const available = players.filter((player) => player.connected && !draftIds.has(player.id));
+      $("#draftCount").textContent = `${inGroup.length} ${inGroup.length === 1 ? "room" : "rooms"}`;
+      $("#useGroupButton").disabled = inGroup.length === 0;
+      $("#groupDropZone").innerHTML = inGroup.length
+        ? inGroup.map((player) => builderRoom(player, "available", "−", `Remove ${player.name}`)).join("")
+        : `<div class="drop-hint">Drag a room here to add it to the group.</div>`;
+      $("#availableDropZone").innerHTML = available.length
+        ? available.map((player) => builderRoom(player, "group", "+", `Add ${player.name}`)).join("")
+        : `<div class="drop-hint">All available rooms are in the group. Drag one here to remove it.</div>`;
+    }
+
+    function builderRoom(player, destination, symbol, label) {
+      const subtitle = player.artist ? `${player.track} · ${player.artist}` : player.track;
+      return `
+        <div class="builder-room" draggable="true" tabindex="0" data-room-id="${player.id}" aria-label="Drag ${escapeHtml(player.name)} between lists">
+          <span class="room-art ${player.color}" aria-hidden="true">${player.initials}</span>
+          <span class="builder-room-copy"><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(subtitle)}</small></span>
+          <button class="move-button" type="button" data-move="${player.id}" data-destination="${destination}" aria-label="${label}">${symbol}</button>
+        </div>
+      `;
+    }
+
+    function selectGroup(group) {
+      selectedIds = [...group.ids];
+      selectedName = group.name;
+      selectedPresetId = group.id;
+      renderSelection();
+    }
+
+    function requestDeleteGroup(group) {
+      pendingDeleteGroupId = group.id;
+      $("#deletePrompt").textContent = `Delete "${group.name}"? This removes the saved preset only; current playback and sync are unchanged.`;
+      $("#deleteDialog").showModal();
+    }
+
+    function deleteSavedGroup(groupId) {
+      const index = groups.findIndex((group) => group.id === groupId);
+      if (index < 0) return;
+      const [deletedGroup] = groups.splice(index, 1);
+      if (selectedPresetId === deletedGroup.id) {
+        selectedPresetId = null;
+        selectedName = selectedIds.length === 1
+          ? roomById(selectedIds[0])?.name ?? "Selected room"
+          : "Unsaved group";
+      }
+      renderSelection();
+      $("#deleteDialog").close();
+      showToast(`Deleted ${deletedGroup.name}. Current playback is unchanged.`);
+    }
+
+    function selectPlayer(player) {
+      if (!player.connected) return;
+      selectedIds = [player.id];
+      selectedName = player.name;
+      selectedPresetId = null;
+      renderSelection();
+    }
+
+    function showView(view) {
+      const isBuilder = view === "builder";
+      $("#browseView").classList.toggle("screen-hidden", isBuilder);
+      $("#builderView").classList.toggle("screen-hidden", !isBuilder);
+      $("#screenTitle").textContent = isBuilder ? "Build a group" : "Players";
+      $(".app-scroll").scrollTop = 0;
+    }
+
+    function openBuilder(group = null) {
+      editingGroupId = group?.id ?? null;
+      draftIds = new Set(group?.ids ?? selectedIds);
+      $("#draftName").value = group?.name ?? (selectedPresetId === null ? "Room group" : selectedName);
+      $("#savePresetButton").textContent = editingGroupId === null ? "Save as preset" : "Save changes";
+      renderBuilder();
+      showView("builder");
+    }
+
+    function movePlayer(playerId, destination) {
+      if (destination === "group") draftIds.add(playerId);
+      else draftIds.delete(playerId);
+      renderBuilder();
+    }
+
+    function addPlayerToSelection(playerId) {
+      const player = roomById(playerId);
+      if (!player?.connected || selectedIds.includes(playerId)) return;
+      selectedIds = [...selectedIds, playerId];
+      selectedName = "Unsaved group";
+      selectedPresetId = null;
+      renderSelection();
+      showToast(`${player.name} added to the current selection.`);
+    }
+
+    function saveDraftPreset(name) {
+      if (draftIds.size < 2) return;
+      const ids = players.filter((player) => draftIds.has(player.id)).map((player) => player.id);
+      if (editingGroupId !== null) {
+        const group = groups.find((candidate) => candidate.id === editingGroupId);
+        if (!group) {
+          editingGroupId = null;
+          showToast("This saved group is no longer available.");
+          return;
+        }
+        group.name = name;
+        group.ids = ids;
+        if (selectedPresetId === group.id) {
+          selectedPresetId = null;
+          selectedName = selectedIds.length === 1
+            ? roomById(selectedIds[0])?.name ?? "Selected room"
+            : "Unsaved group";
+        }
+        editingGroupId = null;
+        renderPresets();
+        renderSelection();
+        showView("browse");
+        showToast(`Updated ${name} · ${ids.length} rooms. Current playback is unchanged.`);
+        return;
+      }
+      groups.push({ id: `saved-${Date.now()}`, name, ids });
+      renderSelection();
+      showToast(`Saved ${name} · ${ids.length} rooms. Use these rooms to start syncing.`);
+    }
+
+    function applyDraft() {
+      if (draftIds.size === 0) return;
+      const ids = players.filter((player) => draftIds.has(player.id)).map((player) => player.id);
+      const name = $("#draftName").value.trim() || "Room group";
+      selectedPresetId = null;
+      selectedName = name;
+      selectedIds = ids;
+      editingGroupId = null;
+      renderSelection();
+      showView("browse");
+      showToast(`Selected ${name} · ${ids.length} rooms`);
+    }
+
+    function showToast(message) {
+      const toast = $("#toast");
+      toast.textContent = message;
+      toast.classList.remove("screen-hidden");
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => toast.classList.add("screen-hidden"), 2600);
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[character]);
+    }
+
+    $("#presetList").addEventListener("click", (event) => {
+      const editButton = event.target.closest("[data-edit-preset]");
+      if (editButton) {
+        const group = groups.find((candidate) => candidate.id === editButton.dataset.editPreset);
+        hideGroupOptions();
+        if (group) openBuilder(group);
+        return;
+      }
+      const deleteButton = event.target.closest("[data-delete-preset]");
+      if (deleteButton) {
+        const group = groups.find((candidate) => candidate.id === deleteButton.dataset.deletePreset);
+        hideGroupOptions();
+        if (group) requestDeleteGroup(group);
+        return;
+      }
+      const button = event.target.closest("[data-preset]");
+      if (button) {
+        if (suppressPresetClick) {
+          suppressPresetClick = false;
+          event.preventDefault();
+          return;
+        }
+        hideGroupOptions();
+        const group = groups.find((candidate) => candidate.id === button.dataset.preset);
+        if (group) selectGroup(group);
+      }
+    });
+    $("#presetList").addEventListener("pointerdown", (event) => {
+      const button = event.target.closest("[data-preset]");
+      if (!button || event.button !== 0) return;
+      clearPendingPresetHold();
+      pressedPresetButton = button;
+      presetPointerId = event.pointerId;
+      pressOrigin = { x: event.clientX, y: event.clientY };
+      longPressTimer = window.setTimeout(() => {
+        if (pressedPresetButton !== button) return;
+        revealGroupOptions(button);
+        suppressPresetClick = true;
+        window.setTimeout(() => { suppressPresetClick = false; }, 1000);
+      }, 600);
+    });
+    document.addEventListener("pointermove", (event) => {
+      if (!pressedPresetButton || event.pointerId !== presetPointerId || !pressOrigin) return;
+      if (Math.hypot(event.clientX - pressOrigin.x, event.clientY - pressOrigin.y) > 10) {
+        clearPendingPresetHold();
+      }
+    });
+    document.addEventListener("pointerup", clearPendingPresetHold);
+    document.addEventListener("pointercancel", clearPendingPresetHold);
+    $("#presetList").addEventListener("contextmenu", (event) => {
+      const button = event.target.closest("[data-preset]");
+      if (!button) return;
+      event.preventDefault();
+      revealGroupOptions(button);
+    });
+    $("#presetList").addEventListener("keydown", (event) => {
+      if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+      const button = event.target.closest("[data-preset]");
+      if (!button) return;
+      event.preventDefault();
+      revealGroupOptions(button);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!event.target.closest("#presetList")) hideGroupOptions();
+    });
+    $("#roomList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-player]");
+      if (button) {
+        const player = roomById(button.dataset.player);
+        if (player) selectPlayer(player);
+      }
+    });
+    $("#buildGroupButton").addEventListener("click", openBuilder);
+    $("#cancelBuilderButton").addEventListener("click", () => {
+      editingGroupId = null;
+      showView("browse");
+    });
+    $("#savePresetButton").addEventListener("click", () => {
+      if (draftIds.size < 2) {
+        showToast("Add at least two rooms before saving.");
+        return;
+      }
+      if (editingGroupId !== null) {
+        const name = $("#draftName").value.trim();
+        if (!name) {
+          showToast("Enter a name for this player group.");
+          return;
+        }
+        saveDraftPreset(name);
+        return;
+      }
+      $("#presetName").value = $("#draftName").value.trim();
+      $("#saveDialog").showModal();
+      $("#presetName").focus();
+    });
+    $("#closeDialogButton").addEventListener("click", () => $("#saveDialog").close());
+    $("#saveForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = $("#presetName").value.trim();
+      if (!name || draftIds.size < 2) return;
+      $("#saveDialog").close();
+      saveDraftPreset(name);
+    });
+    $("#cancelDeleteButton").addEventListener("click", () => $("#deleteDialog").close());
+    $("#deleteDialog").addEventListener("close", () => { pendingDeleteGroupId = null; });
+    $("#deleteForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (pendingDeleteGroupId !== null) deleteSavedGroup(pendingDeleteGroupId);
+    });
+    $("#useGroupButton").addEventListener("click", applyDraft);
+    $("#controlButton").addEventListener("click", () => showToast(`Ready to control ${selectedName}.`));
+
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-move]");
+      if (button) movePlayer(button.dataset.move, button.dataset.destination);
+    });
+    document.addEventListener("dragstart", (event) => {
+      const room = event.target.closest("[data-room-id]");
+      if (!room || !event.dataTransfer) return;
+      draggedPlayerId = room.dataset.roomId;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggedPlayerId);
+    });
+    document.querySelectorAll("[data-dropzone]").forEach((zone) => {
+      zone.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        zone.classList.add("is-over");
+      });
+      zone.addEventListener("dragleave", (event) => {
+        if (!zone.contains(event.relatedTarget)) zone.classList.remove("is-over");
+      });
+      zone.addEventListener("drop", (event) => {
+        event.preventDefault();
+        zone.classList.remove("is-over");
+        const playerId = event.dataTransfer?.getData("text/plain") || draggedPlayerId;
+        if (playerId && roomById(playerId)) {
+          if (zone.dataset.dropzone === "selection") addPlayerToSelection(playerId);
+          else movePlayer(playerId, zone.dataset.dropzone);
+        }
+        draggedPlayerId = null;
+      });
+    });
+
+    renderSelection();
+  </script>
+</body>
+</html>

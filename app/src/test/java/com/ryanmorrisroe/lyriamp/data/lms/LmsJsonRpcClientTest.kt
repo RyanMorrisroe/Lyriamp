@@ -37,6 +37,22 @@ class LmsJsonRpcClientTest {
     }
 
     @Test
+    fun createsCredentialIndependentNormalizedEndpointKeys() {
+        assertEquals(
+            "http://lms.local:9000",
+            LmsServerConnection(
+                host = " LMS.LOCAL ",
+                username = "listener",
+                password = "secret"
+            ).endpointKey()
+        )
+        assertEquals(
+            "https://[::1]:9001",
+            LmsServerConnection(host = "::1", port = 9001, useHttps = true).endpointKey()
+        )
+    }
+
+    @Test
     fun rejectsInvalidConnectionDetails() {
         assertThrows(IllegalArgumentException::class.java) {
             LmsServerConnection(host = "").jsonRpcUrl()
@@ -84,6 +100,31 @@ class LmsJsonRpcClientTest {
         } finally {
             client.close()
         }
+    }
+
+    @Test
+    fun usesServerStatusFallbacksAndRequiresVersion() = runBlocking {
+        val responses = listOf(
+            """{"id":1,"result":{"_version":"9.2.1","players_loop":[{},{}]}}""",
+            """{"id":1,"result":{"count":0}}"""
+        )
+        var responseIndex = 0
+        val client = HttpClient(MockEngine { respondJson(responses[responseIndex++]) })
+
+        try {
+            assertEquals(
+                LmsServerInfo("9.2.1", 2),
+                LmsJsonRpcClient(client).testConnection(LmsServerConnection("lms.local"))
+            )
+            assertThrows(LmsProtocolException::class.java) {
+                runBlocking {
+                    LmsJsonRpcClient(client).testConnection(LmsServerConnection("lms.local"))
+                }
+            }
+        } finally {
+            client.close()
+        }
+        Unit
     }
 
     @Test
@@ -648,6 +689,87 @@ class LmsJsonRpcClientTest {
     }
 
     @Test
+    fun readsPlayerStatusFallbackFieldsAndBooleanValues() = runBlocking {
+        val responses = listOf(
+            """{"id":1,"result":{"mode":"pause","current_title":"Fallback title","duration":"90","can_seek":"no","time":"invalid"}}""",
+            """{"id":1,"result":{"duration":"90","can_seek":"unknown"}}"""
+        )
+        var responseIndex = 0
+        val client = HttpClient(MockEngine { respondJson(responses[responseIndex++]) })
+
+        try {
+            val clientUnderTest = LmsJsonRpcClient(client)
+            val status = clientUnderTest.getPlayerStatus(LmsServerConnection("lms.local"), "player")
+            assertEquals(LmsPlaybackMode.PAUSED, status.mode)
+            assertEquals("Fallback title", status.title)
+            assertEquals(0.0, status.positionSeconds, 0.0)
+            assertEquals(90.0, status.durationSeconds!!, 0.0)
+            assertEquals(false, status.canSeek)
+
+            val fallbackSeekStatus =
+                clientUnderTest.getPlayerStatus(LmsServerConnection("lms.local"), "player")
+            assertEquals(LmsPlaybackMode.UNKNOWN, fallbackSeekStatus.mode)
+            assertEquals(true, fallbackSeekStatus.canSeek)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun queriesAndChangesSyncGroupsUsingLmsCommands() = runBlocking {
+        val commands = mutableListOf<List<String>>()
+        val playerIds = mutableListOf<String>()
+        val client = HttpClient(MockEngine { request ->
+            commands += capturedCommand(request)
+            playerIds += capturedPlayerId(request)
+            respondJson("""{"id":1,"result":{"_sync":"leader,member"}}""")
+        })
+
+        try {
+            val gateway = LmsJsonRpcClient(client)
+            val connection = LmsServerConnection("lms.local")
+
+            assertEquals(
+                listOf("leader", "member"),
+                gateway.getSyncGroupMembers(connection, "leader")
+            )
+            gateway.syncPlayers(connection, "leader", "new-member")
+            gateway.unsyncPlayer(connection, "member")
+
+            assertEquals(
+                listOf(
+                    listOf("sync", "?"),
+                    listOf("sync", "new-member"),
+                    listOf("sync", "-")
+                ),
+                commands
+            )
+            assertEquals(listOf("leader", "leader", "member"), playerIds)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun treatsLmsDashSyncResponseAsAnUnselectedPlayer() = runBlocking {
+        val client = HttpClient(MockEngine {
+            respondJson("""{"id":1,"result":{"_sync":"-"}}""")
+        })
+
+        try {
+            assertEquals(
+                listOf("solo-player"),
+                LmsJsonRpcClient(client).getSyncGroupMembers(
+                    LmsServerConnection("lms.local"),
+                    "solo-player"
+                )
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun readsQueuePagesWithAbsoluteIndexesAndMetadata() = runBlocking {
         var capturedRequest: HttpRequestData? = null
         val client = HttpClient(MockEngine { request ->
@@ -878,6 +1000,60 @@ class LmsJsonRpcClientTest {
     }
 
     @Test
+    fun rejectsInvalidMixerAndPlaybackOptionResponses() = runBlocking {
+        val responses = listOf(
+            """{"id":1,"result":{"_volume":101}}""",
+            """{"id":1,"result":{"_volume":37}}""",
+            """{"id":1,"result":{}}""",
+            """{"id":1,"result":{}}""",
+            """{"id":1,"result":{"_shuffle":9}}""",
+            """{"id":1,"result":{"_shuffle":0}}""",
+            """{"id":1,"result":{}}""",
+            """{"id":1,"result":{"_shuffle":0}}""",
+            """{"id":1,"result":{"_repeat":9}}"""
+        )
+        var responseIndex = 0
+        val client = HttpClient(MockEngine { respondJson(responses[responseIndex++]) })
+
+        try {
+            val clientUnderTest = LmsJsonRpcClient(client)
+            assertThrows(LmsProtocolException::class.java) {
+                runBlocking {
+                    clientUnderTest.getPlayerMixerState(LmsServerConnection("lms.local"), "player")
+                }
+            }
+            assertThrows(LmsProtocolException::class.java) {
+                runBlocking {
+                    clientUnderTest.getPlayerMixerState(LmsServerConnection("lms.local"), "player")
+                }
+            }
+            assertThrows(LmsProtocolException::class.java) {
+                runBlocking {
+                    clientUnderTest.getPlayerPlaybackOptions(LmsServerConnection("lms.local"), "player")
+                }
+            }
+            assertThrows(LmsProtocolException::class.java) {
+                runBlocking {
+                    clientUnderTest.getPlayerPlaybackOptions(LmsServerConnection("lms.local"), "player")
+                }
+            }
+            assertThrows(LmsProtocolException::class.java) {
+                runBlocking {
+                    clientUnderTest.getPlayerPlaybackOptions(LmsServerConnection("lms.local"), "player")
+                }
+            }
+            assertThrows(LmsProtocolException::class.java) {
+                runBlocking {
+                    clientUnderTest.getPlayerPlaybackOptions(LmsServerConnection("lms.local"), "player")
+                }
+            }
+        } finally {
+            client.close()
+        }
+        Unit
+    }
+
+    @Test
     fun reportsHttpAndProtocolFailures() {
         runBlocking {
             val unauthorizedClient = HttpClient(
@@ -904,6 +1080,32 @@ class LmsJsonRpcClientTest {
                 }
             } finally {
                 malformedClient.close()
+            }
+        }
+    }
+
+    @Test
+    fun reportsInvalidJsonAndNonObjectResponses() {
+        runBlocking {
+            val responses = listOf("not-json", "[]")
+            var responseIndex = 0
+            val client = HttpClient(MockEngine {
+                respond(
+                    content = responses[responseIndex++],
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+            })
+
+            try {
+                repeat(2) {
+                    assertThrows(LmsProtocolException::class.java) {
+                        runBlocking {
+                            LmsJsonRpcClient(client).testConnection(LmsServerConnection("lms.local"))
+                        }
+                    }
+                }
+            } finally {
+                client.close()
             }
         }
     }

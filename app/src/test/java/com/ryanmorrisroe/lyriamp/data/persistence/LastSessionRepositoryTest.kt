@@ -40,6 +40,7 @@ class LastSessionRepositoryTest {
             val snapshot = LastSessionSnapshot(
                 serverProfileId = "server-1",
                 playerId = "player-1",
+                selectedPlayerIds = listOf("player-1", "player-2"),
                 locationStack = listOf(
                     LastSessionLocation("Library"),
                     LastSessionLocation("Artists", LmsLibraryQuery.ARTISTS),

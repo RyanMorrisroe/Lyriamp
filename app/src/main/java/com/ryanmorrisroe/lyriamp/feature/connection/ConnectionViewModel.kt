@@ -23,9 +23,13 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerRemoteGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerInfo
+import com.ryanmorrisroe.lyriamp.data.lms.SavedLmsPlayerGroup
+import com.ryanmorrisroe.lyriamp.data.lms.endpointKey
+import com.ryanmorrisroe.lyriamp.data.persistence.PlayerGroupRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.SavedServerProfile
 import com.ryanmorrisroe.lyriamp.data.persistence.SavedServerRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
@@ -44,6 +48,17 @@ data class ConnectionUiState(
     val activeConnection: LmsServerConnection? = null,
     val serverProfileId: String? = null,
     val selectedPlayerId: String? = null,
+    val selectedPlayerIds: List<String> = emptyList(),
+    val playerStatusesById: Map<String, LmsPlayerStatus> = emptyMap(),
+    val playerStatusErrorIds: Set<String> = emptySet(),
+    val playerGroups: List<SavedLmsPlayerGroup> = emptyList(),
+    val groupBuilderPlayerIds: List<String> = emptyList(),
+    val groupNameDraft: String = "",
+    val isApplyingPlayerSelection: Boolean = false,
+    val isSavingPlayerGroup: Boolean = false,
+    val removingPlayerGroupId: String? = null,
+    val playerGroupMessage: String? = null,
+    val playerGroupErrorMessage: String? = null,
     val playerStatus: LmsPlayerStatus? = null,
     val playerMixerState: LmsPlayerMixerState? = null,
     val playerPlaybackOptions: LmsPlayerPlaybackOptions? = null,
@@ -77,10 +92,14 @@ class ConnectionViewModel(
     private val playerDirectory: LmsPlayerDirectory,
     private val playerRemoteGateway: LmsPlayerRemoteGateway,
     private val activePlayerStore: LmsActivePlayerStore? = null,
-    private val savedServerRepository: SavedServerRepository? = null
+    private val savedServerRepository: SavedServerRepository? = null,
+    private val playerGroupRepository: PlayerGroupRepository? = null
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(ConnectionUiState())
     val uiState = mutableUiState.asStateFlow()
+    private var groupObservationJob: Job? = null
+    private var playerSubtitleJob: Job? = null
+    private var playerSelectionJob: Job? = null
 
     init {
         savedServerRepository?.let { repository ->
@@ -191,6 +210,9 @@ class ConnectionViewModel(
                     }
                     return@launch
                 }
+                groupObservationJob?.cancel()
+                playerSubtitleJob?.cancel()
+                playerSelectionJob?.cancel()
                 activePlayerStore?.clear()
                 mutableUiState.update {
                     it.copy(
@@ -205,6 +227,16 @@ class ConnectionViewModel(
                         players = emptyList(),
                         activeConnection = null,
                         selectedPlayerId = null,
+                        selectedPlayerIds = emptyList(),
+                        playerStatusesById = emptyMap(),
+                        playerStatusErrorIds = emptySet(),
+                        playerGroups = emptyList(),
+                        groupBuilderPlayerIds = emptyList(),
+                        isApplyingPlayerSelection = false,
+                        isSavingPlayerGroup = false,
+                        removingPlayerGroupId = null,
+                        playerGroupMessage = null,
+                        playerGroupErrorMessage = null,
                         playerStatus = null,
                         playerMixerState = null,
                         playerPlaybackOptions = null,
@@ -274,15 +306,392 @@ class ConnectionViewModel(
         }
     }
 
-    fun selectPlayer(playerId: String) {
-        val currentState = mutableUiState.value
-        val connection = currentState.activeConnection ?: return
-        val player = currentState.players.firstOrNull { it.id == playerId } ?: return
-        activePlayerStore?.select(LmsActivePlayer(connection, player.id, player.name))
+    fun selectPlayer(playerId: String, onApplied: (() -> Unit)? = null) {
+        applyPlayerSelection(listOf(playerId), onApplied)
+    }
 
+    fun restorePlayerSelection(
+        playerId: String,
+        playerIds: List<String>,
+        onApplied: () -> Unit,
+        onFailure: () -> Unit
+    ) {
+        val state = mutableUiState.value
+        val connection = state.activeConnection ?: return
+        if (playerIds.isNotEmpty()) {
+            if (playerId !in playerIds) {
+                mutableUiState.update {
+                    it.copy(playerGroupErrorMessage = "The saved player selection is invalid.")
+                }
+                onFailure()
+                return
+            }
+            applyPlayerSelection(
+                playerIds,
+                onApplied = onApplied,
+                onFailure = onFailure,
+                preferredLeaderId = playerId
+            )
+            return
+        }
+        playerSelectionJob = viewModelScope.launch {
+            try {
+                val liveGroup = playerRemoteGateway.getSyncGroupMembers(connection, playerId)
+                if (mutableUiState.value.activeConnection != connection) return@launch
+                applyPlayerSelection(
+                    liveGroup.ifEmpty { listOf(playerId) },
+                    onApplied = onApplied,
+                    onFailure = onFailure,
+                    preferredLeaderId = playerId
+                )
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                mutableUiState.update {
+                    if (it.activeConnection == connection) {
+                        it.copy(playerGroupErrorMessage = "Could not restore the current player group.")
+                    } else {
+                        it
+                    }
+                }
+                if (mutableUiState.value.activeConnection == connection) onFailure()
+            }
+        }
+    }
+
+    fun selectPlayerGroup(groupId: String, onApplied: (() -> Unit)? = null) {
+        val group = mutableUiState.value.playerGroups.firstOrNull { it.id == groupId }
+        val connection = mutableUiState.value.activeConnection
+        if (group == null || connection == null || group.endpointKey != connection.endpointKey()) {
+            mutableUiState.update {
+                it.copy(playerGroupErrorMessage = "This saved player group is no longer available.")
+            }
+            return
+        }
+        applyPlayerSelection(group.playerIds, onApplied)
+    }
+
+    fun addPlayerToCurrentSelection(playerId: String) {
+        val state = mutableUiState.value
+        if (state.selectedPlayerIds.contains(playerId)) return
+        applyPlayerSelection(state.selectedPlayerIds + playerId)
+    }
+
+    fun removePlayerFromCurrentSelection(playerId: String) {
+        val state = mutableUiState.value
+        if (playerId !in state.selectedPlayerIds) return
+        applyPlayerSelection(state.selectedPlayerIds - playerId)
+    }
+
+    fun beginGroupBuilder(group: SavedLmsPlayerGroup? = null) {
         mutableUiState.update {
             it.copy(
-                selectedPlayerId = playerId,
+                groupBuilderPlayerIds = group?.playerIds ?: it.selectedPlayerIds,
+                groupNameDraft = group?.name ?: "Room group",
+                playerGroupErrorMessage = null,
+                playerGroupMessage = null
+            )
+        }
+    }
+
+    fun setGroupBuilderPlayerSelected(playerId: String, selected: Boolean) {
+        val state = mutableUiState.value
+        if (state.isApplyingPlayerSelection) return
+        val player = state.players.firstOrNull { it.id == playerId } ?: return
+        if (selected && !player.connected) return
+        val ids = state.groupBuilderPlayerIds
+        if (selected == (player.id in ids)) return
+        mutableUiState.update {
+            it.copy(
+                groupBuilderPlayerIds = if (selected) ids + player.id else ids - player.id,
+                playerGroupErrorMessage = null
+            )
+        }
+    }
+
+    fun setGroupNameDraft(name: String) {
+        mutableUiState.update { it.copy(groupNameDraft = name.take(MAX_GROUP_NAME_LENGTH)) }
+    }
+
+    fun applyGroupBuilder(onApplied: (() -> Unit)? = null) {
+        applyPlayerSelection(mutableUiState.value.groupBuilderPlayerIds, onApplied)
+    }
+
+    fun savePlayerGroup(
+        name: String,
+        playerIds: List<String>? = null,
+        groupId: String? = null
+    ) {
+        val repository = playerGroupRepository ?: run {
+            mutableUiState.update {
+                it.copy(playerGroupErrorMessage = "Saved player groups are not available.")
+            }
+            return
+        }
+        val state = mutableUiState.value
+        val connection = state.activeConnection ?: return
+        val ids = (playerIds ?: state.groupBuilderPlayerIds).distinct()
+        if (state.isSavingPlayerGroup) return
+        if (name.isBlank()) {
+            mutableUiState.update {
+                it.copy(playerGroupErrorMessage = "Enter a name for this player group.")
+            }
+            return
+        }
+        if (ids.size < 2) {
+            mutableUiState.update {
+                it.copy(playerGroupErrorMessage = "Select at least two connected players to save a group.")
+            }
+            return
+        }
+        if (ids.any { id -> state.players.none { it.id == id && it.connected } }) {
+            mutableUiState.update {
+                it.copy(playerGroupErrorMessage = "Only connected players can be saved in a group.")
+            }
+            return
+        }
+        mutableUiState.update {
+            it.copy(
+                isSavingPlayerGroup = true,
+                playerGroupMessage = null,
+                playerGroupErrorMessage = null
+            )
+        }
+        viewModelScope.launch {
+            try {
+                val endpointKey = connection.endpointKey()
+                val saved = if (groupId == null) {
+                    repository.saveGroup(endpointKey, name, ids)
+                    true
+                } else {
+                    repository.updateGroup(endpointKey, groupId, name, ids)
+                }
+                if (!saved) {
+                    mutableUiState.update {
+                        if (it.activeConnection == connection) {
+                            it.copy(
+                                isSavingPlayerGroup = false,
+                                playerGroupErrorMessage = "This saved player group no longer exists."
+                            )
+                        } else {
+                            it
+                        }
+                    }
+                    return@launch
+                }
+                mutableUiState.update {
+                    if (it.activeConnection == connection) {
+                        it.copy(
+                            isSavingPlayerGroup = false,
+                            playerGroupMessage = if (groupId == null) {
+                                "Player group saved."
+                            } else {
+                                "Player group updated."
+                            },
+                            playerGroupErrorMessage = null
+                        )
+                    } else {
+                        it
+                    }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                mutableUiState.update {
+                    if (it.activeConnection == connection) {
+                        it.copy(
+                            isSavingPlayerGroup = false,
+                            playerGroupErrorMessage = "Could not save this player group."
+                        )
+                    } else {
+                        it
+                    }
+                }
+            }
+        }
+    }
+
+    fun removePlayerGroup(groupId: String) {
+        val repository = playerGroupRepository ?: run {
+            mutableUiState.update {
+                it.copy(playerGroupErrorMessage = "Saved player groups are not available.")
+            }
+            return
+        }
+        val connection = mutableUiState.value.activeConnection ?: return
+        if (mutableUiState.value.removingPlayerGroupId != null) return
+        mutableUiState.update {
+            it.copy(
+                removingPlayerGroupId = groupId,
+                playerGroupMessage = null,
+                playerGroupErrorMessage = null
+            )
+        }
+        viewModelScope.launch {
+            try {
+                val removed = repository.removeGroup(connection.endpointKey(), groupId)
+                mutableUiState.update {
+                    if (it.activeConnection == connection) {
+                        it.copy(
+                            removingPlayerGroupId = null,
+                            playerGroupMessage = if (removed) "Player group deleted." else null,
+                            playerGroupErrorMessage = if (removed) null else "This saved player group no longer exists."
+                        )
+                    } else {
+                        it
+                    }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                mutableUiState.update {
+                    if (it.activeConnection == connection) {
+                        it.copy(
+                            removingPlayerGroupId = null,
+                            playerGroupErrorMessage = "Could not delete this player group."
+                        )
+                    } else {
+                        it
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyPlayerSelection(
+        requestedPlayerIds: List<String>,
+        onApplied: (() -> Unit)? = null,
+        onFailure: (() -> Unit)? = null,
+        preferredLeaderId: String? = null
+    ) {
+        val state = mutableUiState.value
+        val connection = state.activeConnection ?: return
+        if (state.isApplyingPlayerSelection) return
+        val playerIds = requestedPlayerIds.distinct()
+        if (playerIds.any { id -> state.players.none { it.id == id && it.connected } }) {
+            mutableUiState.update {
+                it.copy(
+                    playerGroupErrorMessage = "Only connected players can be added to the selection."
+                )
+            }
+            onFailure?.invoke()
+            return
+        }
+        val leaderId = playerIds.firstOrNull { it == preferredLeaderId }
+            ?: playerIds.firstOrNull { it == state.selectedPlayerId }
+            ?: playerIds.firstOrNull()
+        val leader = state.players.firstOrNull { it.id == leaderId }
+        mutableUiState.update {
+            it.copy(
+                isApplyingPlayerSelection = true,
+                playerGroupMessage = null,
+                playerGroupErrorMessage = null
+            )
+        }
+        playerSelectionJob = viewModelScope.launch {
+            var selectionApplied = false
+            try {
+                reconcilePlayerSelection(connection, state.selectedPlayerIds, playerIds, leaderId)
+                if (mutableUiState.value.activeConnection != connection) return@launch
+                if (leader == null) {
+                    activePlayerStore?.clear()
+                    mutableUiState.update {
+                        it.copy(
+                            selectedPlayerId = null,
+                            selectedPlayerIds = emptyList(),
+                            isApplyingPlayerSelection = false,
+                            isSavingPlayerGroup = false,
+                            removingPlayerGroupId = null,
+                            playerGroupMessage = null,
+                            playerGroupErrorMessage = null,
+                            playerStatus = null,
+                            playerMixerState = null,
+                            playerPlaybackOptions = null,
+                            playerQueue = emptyList(),
+                            playerQueueOffset = 0,
+                            playerQueueTotalCount = 0,
+                            playerQueueCurrentIndex = null,
+                            isLoadingPlayerStatus = false,
+                            isLoadingMixerState = false,
+                            isLoadingPlaybackOptions = false,
+                            isLoadingPlayerQueue = false
+                        )
+                    }
+                } else {
+                    activePlayerStore?.select(
+                        LmsActivePlayer(connection, leader.id, leader.name, playerIds)
+                    )
+                    mutableUiState.update {
+                        it.copy(
+                            selectedPlayerId = leader.id,
+                            selectedPlayerIds = playerIds,
+                            isApplyingPlayerSelection = false
+                        )
+                    }
+                    loadSelectedPlayerDetails(connection, leader.id)
+                }
+                selectionApplied = true
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                mutableUiState.update {
+                    if (it.activeConnection == connection) {
+                        it.copy(
+                            isApplyingPlayerSelection = false,
+                            playerGroupErrorMessage =
+                                "Could not apply this selection. LMS may have partially changed its sync groups; try again or verify them on the server."
+                        )
+                    } else {
+                        it
+                    }
+                }
+            }
+            if (selectionApplied) onApplied?.invoke()
+            else if (mutableUiState.value.activeConnection == connection) onFailure?.invoke()
+        }
+    }
+
+    private suspend fun reconcilePlayerSelection(
+        connection: LmsServerConnection,
+        previousPlayerIds: List<String>,
+        selectedPlayerIds: List<String>,
+        leaderPlayerId: String?
+    ) {
+        val observedGroups = (previousPlayerIds + selectedPlayerIds).distinct().associateWith { playerId ->
+            playerRemoteGateway.getSyncGroupMembers(connection, playerId)
+                .filter(String::isNotBlank)
+                .toSet() + playerId
+        }
+        val selectedGroup = selectedPlayerIds.toSet()
+        val isAlreadySelected = selectedPlayerIds.isNotEmpty() &&
+            selectedPlayerIds.all { observedGroups[it] == selectedGroup }
+        val groupsToUnsync = observedGroups.values
+            .filter { group -> group.size > 1 && group.any { it !in selectedGroup } }
+            .distinct()
+        groupsToUnsync.forEach { group ->
+            group.forEach { playerId -> playerRemoteGateway.unsyncPlayer(connection, playerId) }
+        }
+        if (selectedPlayerIds.size > 1 && !isAlreadySelected) {
+            val leaderId = requireNotNull(leaderPlayerId)
+            val existingLeaderGroup = observedGroups[leaderId].orEmpty()
+                .takeIf { group -> group.all { it in selectedGroup } }
+                .orEmpty()
+            selectedPlayerIds.filterNot { it == leaderId || it in existingLeaderGroup }.forEach { memberId ->
+                playerRemoteGateway.syncPlayers(connection, leaderId, memberId)
+            }
+        }
+        if (selectedPlayerIds.isNotEmpty()) {
+            val leaderId = requireNotNull(leaderPlayerId)
+            val actualGroup = playerRemoteGateway.getSyncGroupMembers(connection, leaderId).toSet() + leaderId
+            if (actualGroup != selectedGroup) {
+                throw LmsProtocolException("LMS did not apply the requested player group.")
+            }
+        }
+    }
+
+    private fun loadSelectedPlayerDetails(connection: LmsServerConnection, playerId: String) {
+        mutableUiState.update {
+            it.copy(
                 playerStatus = null,
                 playerMixerState = null,
                 playerPlaybackOptions = null,
@@ -349,6 +758,14 @@ class ConnectionViewModel(
                     it.copy(
                         isLoadingPlayerStatus = false,
                         playerStatus = status,
+                        playerStatusesById = if (status == null) it.playerStatusesById else {
+                            it.playerStatusesById + (playerId to status)
+                        },
+                        playerStatusErrorIds = if (statusFailed) {
+                            it.playerStatusErrorIds + playerId
+                        } else {
+                            it.playerStatusErrorIds - playerId
+                        },
                         playerErrorMessage = if (statusFailed) {
                             "Could not read this player's status."
                         } else {
@@ -404,7 +821,12 @@ class ConnectionViewModel(
             } == true
             mutableUiState.update {
                 if (it.selectedPlayerId == playerId && it.activeConnection == connection) {
-                    it.copy(playerStatus = status, playerErrorMessage = null)
+                    it.copy(
+                        playerStatus = status,
+                        playerStatusesById = it.playerStatusesById + (playerId to status),
+                        playerStatusErrorIds = it.playerStatusErrorIds - playerId,
+                        playerErrorMessage = null
+                    )
                 } else {
                     it
                 }
@@ -415,7 +837,10 @@ class ConnectionViewModel(
         } catch (_: Exception) {
             mutableUiState.update {
                 if (it.selectedPlayerId == playerId && it.activeConnection == connection) {
-                    it.copy(playerErrorMessage = "Could not read this player's status.")
+                    it.copy(
+                        playerStatusErrorIds = it.playerStatusErrorIds + playerId,
+                        playerErrorMessage = "Could not read this player's status."
+                    )
                 } else {
                     it
                 }
@@ -683,6 +1108,8 @@ class ConnectionViewModel(
                         it.copy(
                             isSendingPlayerCommand = false,
                             playerStatus = status,
+                            playerStatusesById = it.playerStatusesById + (playerId to status),
+                            playerStatusErrorIds = it.playerStatusErrorIds - playerId,
                             playerMixerState = mixerState ?: it.playerMixerState,
                             isLoadingMixerState = false,
                             playerPlaybackOptions = playbackOptions ?: it.playerPlaybackOptions,
@@ -749,6 +1176,7 @@ class ConnectionViewModel(
                             players = players,
                             powerUpdatingPlayerId = null,
                             selectedPlayerId = if (deselectPlayer) null else it.selectedPlayerId,
+                            selectedPlayerIds = if (deselectPlayer) emptyList() else it.selectedPlayerIds,
                             playerStatus = if (deselectPlayer) null else it.playerStatus,
                             playerMixerState = if (deselectPlayer) null else it.playerMixerState,
                             playerPlaybackOptions = if (deselectPlayer) null else it.playerPlaybackOptions,
@@ -898,6 +1326,9 @@ class ConnectionViewModel(
     }
 
     private fun prepareConnection() {
+        groupObservationJob?.cancel()
+        playerSubtitleJob?.cancel()
+        playerSelectionJob?.cancel()
         activePlayerStore?.clear()
         mutableUiState.update {
             it.copy(
@@ -907,6 +1338,16 @@ class ConnectionViewModel(
                 activeConnection = null,
                 serverProfileId = null,
                 selectedPlayerId = null,
+                selectedPlayerIds = emptyList(),
+                playerStatusesById = emptyMap(),
+                playerStatusErrorIds = emptySet(),
+                playerGroups = emptyList(),
+                groupBuilderPlayerIds = emptyList(),
+                isApplyingPlayerSelection = false,
+                isSavingPlayerGroup = false,
+                removingPlayerGroupId = null,
+                playerGroupMessage = null,
+                playerGroupErrorMessage = null,
                 playerStatus = null,
                 playerMixerState = null,
                 playerPlaybackOptions = null,
@@ -956,6 +1397,8 @@ class ConnectionViewModel(
                     errorMessage = null
                 )
             }
+            observePlayerGroups(connection)
+            loadPlayerSubtitles(connection, players)
             return true
         } catch (exception: CancellationException) {
             throw exception
@@ -973,6 +1416,72 @@ class ConnectionViewModel(
         }
     }
 
+    private fun observePlayerGroups(connection: LmsServerConnection) {
+        val repository = playerGroupRepository ?: return
+        groupObservationJob?.cancel()
+        val endpointKey = try {
+            connection.endpointKey()
+        } catch (_: IllegalArgumentException) {
+            mutableUiState.update {
+                it.copy(playerGroupErrorMessage = "Could not identify this server for saved groups.")
+            }
+            return
+        }
+        groupObservationJob = viewModelScope.launch {
+            try {
+                repository.observeGroups(endpointKey).collect { groups ->
+                    mutableUiState.update {
+                        if (it.activeConnection == connection) it.copy(playerGroups = groups) else it
+                    }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                mutableUiState.update {
+                    if (it.activeConnection == connection) {
+                        it.copy(playerGroupErrorMessage = "Could not load saved player groups.")
+                    } else {
+                        it
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadPlayerSubtitles(connection: LmsServerConnection, players: List<LmsPlayer>) {
+        playerSubtitleJob?.cancel()
+        mutableUiState.update {
+            it.copy(playerStatusesById = emptyMap(), playerStatusErrorIds = emptySet())
+        }
+        playerSubtitleJob = viewModelScope.launch {
+            players.filter(LmsPlayer::connected).forEach { player ->
+                try {
+                    val status = playerRemoteGateway.getPlayerStatus(connection, player.id)
+                    mutableUiState.update {
+                        if (it.activeConnection == connection) {
+                            it.copy(
+                                playerStatusesById = it.playerStatusesById + (player.id to status),
+                                playerStatusErrorIds = it.playerStatusErrorIds - player.id
+                            )
+                        } else {
+                            it
+                        }
+                    }
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    mutableUiState.update {
+                        if (it.activeConnection == connection) {
+                            it.copy(playerStatusErrorIds = it.playerStatusErrorIds + player.id)
+                        } else {
+                            it
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private fun failConnection(message: String): Boolean {
         mutableUiState.update {
             it.copy(
@@ -982,6 +1491,16 @@ class ConnectionViewModel(
                 activeConnection = null,
                 serverProfileId = null,
                 selectedPlayerId = null,
+                selectedPlayerIds = emptyList(),
+                playerStatusesById = emptyMap(),
+                playerStatusErrorIds = emptySet(),
+                playerGroups = emptyList(),
+                groupBuilderPlayerIds = emptyList(),
+                isApplyingPlayerSelection = false,
+                isSavingPlayerGroup = false,
+                removingPlayerGroupId = null,
+                playerGroupMessage = null,
+                playerGroupErrorMessage = null,
                 playerStatus = null,
                 playerMixerState = null,
                 playerPlaybackOptions = null,
@@ -1003,6 +1522,9 @@ class ConnectionViewModel(
     }
 
     private inline fun updateInput(crossinline transform: ConnectionUiState.() -> ConnectionUiState) {
+        groupObservationJob?.cancel()
+        playerSubtitleJob?.cancel()
+        playerSelectionJob?.cancel()
         activePlayerStore?.clear()
         mutableUiState.update {
             it.transform().copy(
@@ -1010,6 +1532,16 @@ class ConnectionViewModel(
                 players = emptyList(),
                 activeConnection = null,
                 selectedPlayerId = null,
+                selectedPlayerIds = emptyList(),
+                playerStatusesById = emptyMap(),
+                playerStatusErrorIds = emptySet(),
+                playerGroups = emptyList(),
+                groupBuilderPlayerIds = emptyList(),
+                isApplyingPlayerSelection = false,
+                isSavingPlayerGroup = false,
+                removingPlayerGroupId = null,
+                playerGroupMessage = null,
+                playerGroupErrorMessage = null,
                 playerStatus = null,
                 playerMixerState = null,
                 playerPlaybackOptions = null,
@@ -1038,6 +1570,7 @@ class ConnectionViewModel(
 
     private companion object {
         const val QUEUE_PAGE_SIZE = 100
+        const val MAX_GROUP_NAME_LENGTH = 32
     }
 
     class Factory(
@@ -1045,7 +1578,8 @@ class ConnectionViewModel(
         private val playerDirectory: LmsPlayerDirectory,
         private val playerRemoteGateway: LmsPlayerRemoteGateway,
         private val activePlayerStore: LmsActivePlayerStore? = null,
-        private val savedServerRepository: SavedServerRepository? = null
+        private val savedServerRepository: SavedServerRepository? = null,
+        private val playerGroupRepository: PlayerGroupRepository? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -1057,7 +1591,8 @@ class ConnectionViewModel(
                 playerDirectory,
                 playerRemoteGateway,
                 activePlayerStore,
-                savedServerRepository
+                savedServerRepository,
+                playerGroupRepository
             ) as T
         }
     }

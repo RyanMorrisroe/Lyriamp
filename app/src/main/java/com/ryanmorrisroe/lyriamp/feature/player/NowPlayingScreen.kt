@@ -53,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -70,6 +71,7 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
 import com.ryanmorrisroe.lyriamp.ui.artwork.LmsArtworkImage
+import com.ryanmorrisroe.lyriamp.ui.glyph.BackArrowIcon
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -134,8 +136,7 @@ fun NowPlayingScreen(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = "Back" }
                     ) {
-                        PlayerGlyphIcon(
-                            PlayerGlyph.BACK,
+                        BackArrowIcon(
                             MaterialTheme.colorScheme.onSurface,
                             Modifier.size(24.dp)
                         )
@@ -522,8 +523,7 @@ fun PlayerQueueScreen(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = "Back" }
                     ) {
-                        PlayerGlyphIcon(
-                            PlayerGlyph.BACK,
+                        BackArrowIcon(
                             MaterialTheme.colorScheme.onSurface,
                             Modifier.size(24.dp)
                         )
@@ -698,29 +698,11 @@ private fun QueueItemRow(
             ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(42.dp),
-            shape = MaterialTheme.shapes.small,
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            LmsArtworkImage(
-                connection = connection,
-                artworkId = item.artworkId,
-                artworkUrl = item.artworkUrl,
-                contentDescription = "${item.title} artwork",
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Text(
-                    item.title.take(1).uppercase(),
-                    modifier = Modifier.fillMaxSize().padding(8.dp),
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
         if (showDragHandle) {
             Box(
                 modifier = Modifier
                     .size(32.dp)
+                    .padding(end = 4.dp)
                     .pointerInput(item.index, isMutating, dragEnabled) {
                         if (dragEnabled) {
                             detectDragGestures(
@@ -741,6 +723,27 @@ private fun QueueItemRow(
                     PlayerGlyph.DRAG_HANDLE,
                     MaterialTheme.colorScheme.onSurfaceVariant,
                     Modifier.size(20.dp)
+                )
+            }
+        }
+        Surface(
+            modifier = Modifier
+                .size(42.dp)
+                .testTag("queue-artwork-${item.index}"),
+            shape = MaterialTheme.shapes.small,
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            LmsArtworkImage(
+                connection = connection,
+                artworkId = item.artworkId,
+                artworkUrl = item.artworkUrl,
+                contentDescription = "${item.title} artwork",
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Text(
+                    item.title.take(1).uppercase(),
+                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                    textAlign = TextAlign.Center
                 )
             }
         }
@@ -792,7 +795,6 @@ private fun LmsRepeatMode.displayName(): String = when (this) {
 }
 
 private enum class PlayerGlyph {
-    BACK,
     CLOSE,
     NEXT,
     PAUSE,
@@ -856,11 +858,6 @@ private fun PlayerGlyphIcon(
         }
 
         when (glyph) {
-            PlayerGlyph.BACK -> {
-                line(19f, 12f, 5f, 12f)
-                line(5f, 12f, 11f, 6f)
-                line(5f, 12f, 11f, 18f)
-            }
             PlayerGlyph.CLOSE -> {
                 line(6f, 6f, 18f, 18f)
                 line(18f, 6f, 6f, 18f)

@@ -113,6 +113,16 @@ sealed interface LmsPlayerCommand {
 interface LmsPlayerRemoteGateway {
     suspend fun getPlayerStatus(connection: LmsServerConnection, playerId: String): LmsPlayerStatus
 
+    suspend fun getSyncGroupMembers(connection: LmsServerConnection, playerId: String): List<String>
+
+    suspend fun syncPlayers(
+        connection: LmsServerConnection,
+        leaderPlayerId: String,
+        memberPlayerId: String
+    )
+
+    suspend fun unsyncPlayer(connection: LmsServerConnection, playerId: String)
+
     suspend fun getPlayerQueue(
         connection: LmsServerConnection,
         playerId: String,

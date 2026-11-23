@@ -14,9 +14,11 @@ import com.ryanmorrisroe.lyriamp.data.persistence.AndroidKeystoreCredentialCiphe
 import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreSavedServerRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreLastSessionRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreDisplayPreferencesRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.DataStorePlayerGroupRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferencesRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.displayPreferencesDataStore
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.PlayerGroupRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.SavedServerRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.savedServerDataStore
 import io.ktor.client.HttpClient
@@ -48,6 +50,9 @@ class LyriampApplication : Application() {
     }
     val lastSessionRepository: LastSessionRepository by lazy {
         DataStoreLastSessionRepository(applicationContext.savedServerDataStore)
+    }
+    val playerGroupRepository: PlayerGroupRepository by lazy {
+        DataStorePlayerGroupRepository(applicationContext.savedServerDataStore)
     }
     val displayPreferencesRepository: DisplayPreferencesRepository by lazy {
         DataStoreDisplayPreferencesRepository(applicationContext.displayPreferencesDataStore)

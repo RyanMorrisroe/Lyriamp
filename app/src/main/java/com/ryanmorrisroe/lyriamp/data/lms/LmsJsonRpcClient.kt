@@ -275,6 +275,49 @@ class LmsJsonRpcClient(
         )
     }
 
+    override suspend fun getSyncGroupMembers(
+        connection: LmsServerConnection,
+        playerId: String
+    ): List<String> {
+        require(playerId.isNotBlank()) { "Player ID cannot be blank." }
+        val result = request(connection, playerId, syncGroupQueryCommand())
+        val syncResponse = result["_sync"] ?: result["sync"]
+            ?: throw LmsProtocolException("LMS response did not include this player's sync group.")
+        val rawMembers = when (syncResponse) {
+            is JsonPrimitive -> syncResponse.contentOrNull
+                ?: throw LmsProtocolException("LMS returned an invalid sync group.")
+            is JsonArray -> syncResponse.joinToString(",") { member ->
+                (member as? JsonPrimitive)?.contentOrNull
+                    ?: throw LmsProtocolException("LMS returned an invalid sync-group member.")
+            }
+            else -> throw LmsProtocolException("LMS returned an invalid sync group.")
+        }
+        if (rawMembers.isBlank()) {
+            throw LmsProtocolException("LMS returned an empty sync-group response.")
+        }
+        val members = rawMembers.takeUnless { it == "-" }?.split(',').orEmpty()
+        return (members + playerId)
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+    }
+
+    override suspend fun syncPlayers(
+        connection: LmsServerConnection,
+        leaderPlayerId: String,
+        memberPlayerId: String
+    ) {
+        require(leaderPlayerId.isNotBlank()) { "Leader player ID cannot be blank." }
+        require(memberPlayerId.isNotBlank()) { "Member player ID cannot be blank." }
+        require(leaderPlayerId != memberPlayerId) { "A player cannot be synced to itself." }
+        request(connection, leaderPlayerId, syncPlayerCommand(memberPlayerId))
+    }
+
+    override suspend fun unsyncPlayer(connection: LmsServerConnection, playerId: String) {
+        require(playerId.isNotBlank()) { "Player ID cannot be blank." }
+        request(connection, playerId, unsyncPlayerCommand())
+    }
+
     override suspend fun getPlayerQueue(
         connection: LmsServerConnection,
         playerId: String,
@@ -495,6 +538,21 @@ class LmsJsonRpcClient(
         add(JsonPrimitive("playlist"))
         add(JsonPrimitive(control))
         add(JsonPrimitive("?"))
+    }
+
+    private fun syncGroupQueryCommand() = buildJsonArray {
+        add(JsonPrimitive("sync"))
+        add(JsonPrimitive("?"))
+    }
+
+    private fun syncPlayerCommand(memberPlayerId: String) = buildJsonArray {
+        add(JsonPrimitive("sync"))
+        add(JsonPrimitive(memberPlayerId))
+    }
+
+    private fun unsyncPlayerCommand() = buildJsonArray {
+        add(JsonPrimitive("sync"))
+        add(JsonPrimitive("-"))
     }
 
     private fun libraryPageCommand(
