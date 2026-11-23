@@ -207,7 +207,7 @@ class LibraryLayoutTest {
 
     @Test
     fun mixedSearchResultsKeepItemTypeLabels() {
-        showLibrary(FakeDisplayPreferences(), searchText = "mixed")
+        val gateway = showLibrary(FakeDisplayPreferences(), searchText = "mixed")
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Search Artist").fetchSemanticsNodes().isNotEmpty() &&
                 compose.onAllNodesWithText("Search Album").fetchSemanticsNodes().isNotEmpty() &&
@@ -225,6 +225,7 @@ class LibraryLayoutTest {
             useUnmergedTree = true
         ).fetchSemanticsNode()
         compose.onNodeWithContentDescription("Play Search Artist").fetchSemanticsNode()
+        compose.waitUntil(10_000) { gateway.artistArtworkRequests.get() > 0 }
     }
 
     @Test
@@ -381,6 +382,7 @@ class LibraryLayoutTest {
 
     private class FakeLibrary : LmsLibraryGateway {
         val requests = CopyOnWriteArrayList<Pair<LmsLibraryQuery, Int>>()
+        val artistArtworkRequests = AtomicInteger()
 
         override suspend fun getPage(
             connection: LmsServerConnection,
@@ -484,7 +486,10 @@ class LibraryLayoutTest {
         override suspend fun getArtistArtworkUrl(
             connection: LmsServerConnection,
             artistId: String
-        ): String? = null
+        ): String? {
+            artistArtworkRequests.incrementAndGet()
+            return null
+        }
 
         override suspend fun playNow(connection: LmsServerConnection, playerId: String, item: LmsLibraryItem) = Unit
     }

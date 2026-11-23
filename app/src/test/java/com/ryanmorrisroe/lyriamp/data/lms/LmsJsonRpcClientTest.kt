@@ -386,20 +386,27 @@ class LmsJsonRpcClientTest {
 
     @Test
     fun searchesArtistsAlbumsAndTracksInBoundedGroups() = runBlocking {
-        var capturedRequest: HttpRequestData? = null
+        val capturedRequests = mutableListOf<HttpRequestData>()
+        var responseIndex = 0
         val client = HttpClient(MockEngine { request ->
-            capturedRequest = request
-            respondJson(
-                """
-                {"id":1,"result":{
-                  "contributors_count":2,"contributors_loop":[{"contributor_id":3,"contributor":"Artist"}],
-                  "albums_count":4,"albums_loop":[{"album_id":5,"album":"Album","artist":"Album Artist",
-                    "year":2001,"artwork":6}],
-                  "tracks_count":8,"tracks_loop":[{"track_id":7,"track":"Track","artist":"Track Artist",
-                    "album":"Track Album","duration":180,"coverid":"5466de2c"}]
-                }}
+            capturedRequests += request
+            val response = when (responseIndex++) {
+                0 -> """
+                    {"id":1,"result":{
+                      "contributors_count":2,"contributors_loop":[{"contributor_id":3,"contributor":"Artist"}],
+                      "albums_count":4,"albums_loop":[{"album_id":5,"album":"Album","artwork":6}],
+                      "tracks_count":8,"tracks_loop":[{"track_id":7,"track":"Track","artist":"Track Artist",
+                        "album":"Track Album","duration":180,"coverid":"5466de2c"}]
+                    }}
                 """.trimIndent()
-            )
+                1 -> """
+                    {"id":1,"result":{"count":1,"albums_loop":[
+                      {"id":5,"album":"Album","artist":"Album Artist","year":2001}
+                    ]}}
+                """.trimIndent()
+                else -> error("Unexpected LMS request.")
+            }
+            respondJson(response)
         })
 
         try {
@@ -421,8 +428,37 @@ class LmsJsonRpcClientTest {
             assertEquals("5466de2c", results.tracks.items.single().artworkId)
             assertEquals(8, results.tracks.totalCount)
             assertEquals(
-                listOf("search", "20", "10", "term:blue train", "extended:1"),
-                capturedCommand(capturedRequest)
+                listOf(
+                    listOf("search", "20", "10", "term:blue train", "extended:1"),
+                    listOf("albums", "0", "1", "tags:aljKy", "album_id:5")
+                ),
+                capturedRequests.map(::capturedCommand)
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun searchWithoutAlbumsSkipsAlbumMetadataLookup() = runBlocking {
+        val capturedCommands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            capturedCommands += capturedCommand(request)
+            respondJson("""{"id":1,"result":{"contributors_count":0,"albums_count":0,"tracks_count":0}}""")
+        })
+
+        try {
+            val results = LmsJsonRpcClient(client).search(
+                connection = LmsServerConnection("lms.local"),
+                term = "artist",
+                offset = 0,
+                limit = 30
+            )
+
+            assertEquals(0, results.albums.totalCount)
+            assertEquals(
+                listOf(listOf("search", "0", "30", "term:artist", "extended:1")),
+                capturedCommands
             )
         } finally {
             client.close()

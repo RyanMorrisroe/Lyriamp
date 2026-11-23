@@ -149,7 +149,7 @@ fun LibraryScreen(
         viewType?.let(displayState.preferences::layoutFor) ?: LibraryLayout.COMFORTABLE
     }
     val artistArtworkResolver: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)? =
-        if (state.searchText.isBlank() && state.location.query == LmsLibraryQuery.ARTISTS) {
+        if (state.searchText.isNotBlank() || state.location.query == LmsLibraryQuery.ARTISTS) {
             viewModel::resolveArtistArtwork
         } else {
             null

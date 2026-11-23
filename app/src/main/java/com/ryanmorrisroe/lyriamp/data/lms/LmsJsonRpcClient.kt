@@ -148,24 +148,50 @@ class LmsJsonRpcClient(
         validateLibraryPage(offset, limit)
         require(term.isNotBlank()) { "Enter a search term." }
         val result = request(connection, "", librarySearchCommand(term, offset, limit))
+        val artists = result.searchPage(
+            loopName = "contributors_loop",
+            countField = "contributors_count",
+            idField = "contributor_id",
+            titleField = "contributor",
+            itemType = LmsLibraryItemType.ARTIST,
+            offset = offset
+        )
+        val albums = result.searchPage(
+            loopName = "albums_loop",
+            countField = "albums_count",
+            idField = "album_id",
+            titleField = "album",
+            itemType = LmsLibraryItemType.ALBUM,
+            offset = offset,
+            artworkIdFields = arrayOf("artwork", "artwork_track_id")
+        )
+        val albumIds = albums.items.map { it.id }.distinct()
+        val albumMetadataById = if (albumIds.isEmpty()) {
+            emptyMap()
+        } else {
+            getPage(
+                connection = connection,
+                query = LmsLibraryQuery.ALBUMS,
+                offset = 0,
+                limit = albumIds.size,
+                filter = LmsLibraryFilter(albumId = albumIds.joinToString(",")),
+                search = null
+            ).items.associateBy { it.id }
+        }
+        val enrichedAlbums = albums.copy(
+            items = albums.items.map { item ->
+                val metadata = albumMetadataById[item.id] ?: return@map item
+                item.copy(
+                    artist = metadata.artist ?: item.artist,
+                    artworkId = item.artworkId ?: metadata.artworkId,
+                    artworkUrl = item.artworkUrl ?: metadata.artworkUrl,
+                    year = metadata.year ?: item.year
+                )
+            }
+        )
         return LmsLibrarySearchResults(
-            artists = result.searchPage(
-                loopName = "contributors_loop",
-                countField = "contributors_count",
-                idField = "contributor_id",
-                titleField = "contributor",
-                itemType = LmsLibraryItemType.ARTIST,
-                offset = offset
-            ),
-            albums = result.searchPage(
-                loopName = "albums_loop",
-                countField = "albums_count",
-                idField = "album_id",
-                titleField = "album",
-                itemType = LmsLibraryItemType.ALBUM,
-                offset = offset,
-                artworkIdFields = arrayOf("artwork")
-            ),
+            artists = artists,
+            albums = enrichedAlbums,
             tracks = result.searchPage(
                 loopName = "tracks_loop",
                 countField = "tracks_count",
