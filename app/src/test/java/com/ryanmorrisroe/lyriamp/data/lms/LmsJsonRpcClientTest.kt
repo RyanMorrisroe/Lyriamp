@@ -134,7 +134,7 @@ class LmsJsonRpcClientTest {
             respondJson(
                 """
                 {"id":1,"result":{"count":101,"albums_loop":[
-                                    {"id":42,"album":"Blue Train","artist":"John Coltrane",
+                                    {"id":42,"album":"Blue Train","artist":"John Coltrane","year":1967,
                    "artwork_track_id":501,"artwork_url":"../imageproxy/cover.jpg"}
                 ]}}
                 """.trimIndent()
@@ -160,13 +160,14 @@ class LmsJsonRpcClientTest {
                     title = "Blue Train",
                     artist = "John Coltrane",
                     artworkId = "501",
-                    artworkUrl = "../imageproxy/cover.jpg"
+                    artworkUrl = "../imageproxy/cover.jpg",
+                    year = "1967"
                 ),
                 page.items.single()
             )
             val command = capturedCommand(capturedRequest)
             assertEquals(
-                listOf("albums", "50", "40", "tags:aljK", "artist_id:7", "search:blue train"),
+                listOf("albums", "50", "40", "tags:aljKy", "artist_id:7", "search:blue train"),
                 command
             )
         } finally {
@@ -293,7 +294,7 @@ class LmsJsonRpcClientTest {
             assertEquals(
                 listOf(
                     listOf("musicartistinfo", "artistphotos", "artist_id:42"),
-                    listOf("albums", "0", "1", "tags:aljK", "artist_id:42")
+                    listOf("albums", "0", "1", "tags:aljKy", "artist_id:42")
                 ),
                 capturedCommands
             )
@@ -392,8 +393,10 @@ class LmsJsonRpcClientTest {
                 """
                 {"id":1,"result":{
                   "contributors_count":2,"contributors_loop":[{"contributor_id":3,"contributor":"Artist"}],
-                  "albums_count":4,"albums_loop":[{"album_id":5,"album":"Album","artwork":6}],
-                  "tracks_count":8,"tracks_loop":[{"track_id":7,"track":"Track","coverid":"5466de2c"}]
+                  "albums_count":4,"albums_loop":[{"album_id":5,"album":"Album","artist":"Album Artist",
+                    "year":2001,"artwork":6}],
+                  "tracks_count":8,"tracks_loop":[{"track_id":7,"track":"Track","artist":"Track Artist",
+                    "album":"Track Album","duration":180,"coverid":"5466de2c"}]
                 }}
                 """.trimIndent()
             )
@@ -410,6 +413,11 @@ class LmsJsonRpcClientTest {
             assertEquals(listOf("Artist"), results.artists.items.map { it.title })
             assertEquals(2, results.artists.totalCount)
             assertEquals("6", results.albums.items.single().artworkId)
+            assertEquals("Album Artist", results.albums.items.single().artist)
+            assertEquals("2001", results.albums.items.single().year)
+            assertEquals("Track Artist", results.tracks.items.single().artist)
+            assertEquals("Track Album", results.tracks.items.single().album)
+            assertEquals(180.0, results.tracks.items.single().durationSeconds!!, 0.0)
             assertEquals("5466de2c", results.tracks.items.single().artworkId)
             assertEquals(8, results.tracks.totalCount)
             assertEquals(
@@ -485,6 +493,45 @@ class LmsJsonRpcClientTest {
                 listOf(
                     listOf("playlistcontrol", "cmd:load", "album_id:album-1"),
                     listOf("playlistcontrol", "cmd:load", "playlist_id:playlist-1")
+                ),
+                commands
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun playsAllArtistAndGenreTracksInAlbumOrder() = runBlocking {
+        val commands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            val requestJson = Json.parseToJsonElement(
+                (request.body as TextContent).text
+            ).jsonObject
+            commands += requestJson["params"]!!.jsonArray[1].jsonArray.map {
+                it.jsonPrimitive.content
+            }
+            respondJson("{\"id\":1,\"result\":{}}")
+        })
+
+        try {
+            val gateway = LmsJsonRpcClient(client)
+            val connection = LmsServerConnection("lms.local")
+            gateway.playNow(
+                connection,
+                "player-1",
+                LmsLibraryItem("artist-1", LmsLibraryItemType.ARTIST, "Artist")
+            )
+            gateway.playNow(
+                connection,
+                "player-1",
+                LmsLibraryItem("genre-1", LmsLibraryItemType.GENRE, "Genre")
+            )
+
+            assertEquals(
+                listOf(
+                    listOf("playlistcontrol", "cmd:load", "artist_id:artist-1", "sort:album"),
+                    listOf("playlistcontrol", "cmd:load", "genre_id:genre-1", "sort:album")
                 ),
                 commands
             )

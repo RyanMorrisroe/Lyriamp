@@ -214,10 +214,17 @@ class LmsJsonRpcClient(
             LmsLibraryItemType.TRACK -> "track_id"
             LmsLibraryItemType.ALBUM -> "album_id"
             LmsLibraryItemType.PLAYLIST -> "playlist_id"
-            LmsLibraryItemType.ARTIST,
-            LmsLibraryItemType.GENRE -> throw IllegalArgumentException("This library item cannot be played directly.")
+            LmsLibraryItemType.ARTIST -> "artist_id"
+            LmsLibraryItemType.GENRE -> "genre_id"
         }
-        request(connection, playerId, playlistControlCommand("load", filterName, item.id))
+        val sort = if (item.type == LmsLibraryItemType.ARTIST ||
+            item.type == LmsLibraryItemType.GENRE
+        ) {
+            "album"
+        } else {
+            null
+        }
+        request(connection, playerId, playlistControlCommand("load", filterName, item.id, sort))
     }
 
     override suspend fun getPlayerStatus(
@@ -376,7 +383,7 @@ class LmsJsonRpcClient(
         add(JsonPrimitive(offset))
         add(JsonPrimitive(limit))
         when (query) {
-            LmsLibraryQuery.ALBUMS -> add(JsonPrimitive("tags:aljK"))
+            LmsLibraryQuery.ALBUMS -> add(JsonPrimitive("tags:aljKy"))
             LmsLibraryQuery.TRACKS,
             LmsLibraryQuery.PLAYLIST_TRACKS -> add(JsonPrimitive("tags:galdeKJc"))
             LmsLibraryQuery.PLAYLISTS -> add(JsonPrimitive("tags:suxKJc"))
@@ -404,10 +411,16 @@ class LmsJsonRpcClient(
         add(JsonPrimitive("artist_id:$artistId"))
     }
 
-    private fun playlistControlCommand(action: String, filterName: String, id: String) = buildJsonArray {
+    private fun playlistControlCommand(
+        action: String,
+        filterName: String,
+        id: String,
+        sort: String? = null
+    ) = buildJsonArray {
         add(JsonPrimitive("playlistcontrol"))
         add(JsonPrimitive("cmd:$action"))
         add(JsonPrimitive("$filterName:$id"))
+        sort?.let { add(JsonPrimitive("sort:$it")) }
     }
 
     private fun validateLibraryPage(offset: Int, limit: Int) {
@@ -520,7 +533,8 @@ class LmsJsonRpcClient(
             isContainer = detectContainer && (
                 this["type"].asText() == "folder" ||
                     id.startsWith("file:", ignoreCase = true) || '/' in id || '\\' in id
-                )
+                ),
+            year = this["year"].asText()?.takeIf(String::isNotBlank)
         )
     }
 

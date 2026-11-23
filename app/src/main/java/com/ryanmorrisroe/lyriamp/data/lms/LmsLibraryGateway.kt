@@ -46,7 +46,8 @@ data class LmsLibraryItem(
     val durationSeconds: Double? = null,
     val artworkId: String? = null,
     val artworkUrl: String? = null,
-    val isContainer: Boolean = false
+    val isContainer: Boolean = false,
+    val year: String? = null
 )
 
 data class LmsLibraryPage(
