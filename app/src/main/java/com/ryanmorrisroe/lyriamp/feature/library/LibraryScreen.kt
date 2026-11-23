@@ -149,7 +149,7 @@ fun LibraryScreen(
         viewType?.let(displayState.preferences::layoutFor) ?: LibraryLayout.COMFORTABLE
     }
     val artistArtworkResolver: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)? =
-        if (state.searchText.isBlank() && state.location.query == LmsLibraryQuery.ARTISTS) {
+        if (state.searchText.isNotBlank() || state.location.query == LmsLibraryQuery.ARTISTS) {
             viewModel::resolveArtistArtwork
         } else {
             null
@@ -536,6 +536,7 @@ fun LibraryScreen(
                     items = items,
                     listState = listState,
                     layout = layout,
+                    isSearchResults = state.searchText.isNotBlank(),
                     activePlayer = state.activePlayer,
                     isPlayingItem = state.isPlayingItem,
                     onOpenItem = viewModel::openItem,
@@ -567,6 +568,7 @@ private fun LibraryResults(
     items: LazyPagingItems<LmsLibraryItem>,
     listState: androidx.compose.foundation.lazy.grid.LazyGridState,
     layout: LibraryLayout,
+    isSearchResults: Boolean,
     activePlayer: LmsActivePlayer?,
     isPlayingItem: Boolean,
     onOpenItem: (LmsLibraryItem) -> Unit,
@@ -609,6 +611,7 @@ private fun LibraryResults(
                     LibraryItemCard(
                         item = item,
                         connection = activePlayer?.connection,
+                        isSearchResults = isSearchResults,
                         isPlayingItem = isPlayingItem,
                         onResolveArtistArtwork = onResolveArtistArtwork,
                         onOpen = { onOpenItem(item) },
@@ -619,6 +622,7 @@ private fun LibraryResults(
                         item = item,
                         connection = activePlayer?.connection,
                         showArtwork = layout == LibraryLayout.COMFORTABLE,
+                        isSearchResults = isSearchResults,
                         isPlayingItem = isPlayingItem,
                         onResolveArtistArtwork = onResolveArtistArtwork,
                         onOpen = { onOpenItem(item) },
@@ -644,18 +648,14 @@ private fun LibraryItemRow(
     item: LmsLibraryItem,
     connection: LmsServerConnection?,
     showArtwork: Boolean,
+    isSearchResults: Boolean,
     isPlayingItem: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit
 ) {
     val canPlay = item.canPlay()
-    val subtitle = listOfNotNull(
-        item.type.displayName(),
-        item.artist,
-        item.album,
-        item.durationSeconds?.let(::formatDuration)
-    ).joinToString(" · ")
+    val subtitle = item.displaySubtitle(isSearchResults)
 
     ListItem(
         modifier = Modifier.clickable {
@@ -666,18 +666,21 @@ private fun LibraryItemRow(
                 LibraryArtwork(
                     item = item,
                     connection = connection,
+                    showTypeLabel = isSearchResults,
                     onResolveArtistArtwork = onResolveArtistArtwork,
                     modifier = Modifier.size(52.dp)
                 )
             }
         } else null,
         headlineContent = { Text(item.title, maxLines = 1) },
-        supportingContent = {
-            Text(subtitle, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        },
+        supportingContent = if (subtitle.isNotBlank()) {
+            {
+                Text(subtitle, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else null,
         trailingContent = {
             if (canPlay) {
-                TextButton(onClick = onPlayNow, enabled = !isPlayingItem) { Text("Play") }
+                LibraryPlayButton(item.title, isPlayingItem, onPlayNow)
             } else {
                 TextButton(onClick = onOpen) { Text(if (item.isContainer) "Open" else "Browse") }
             }
@@ -689,23 +692,49 @@ private fun LibraryItemRow(
 private fun LibraryItemCard(
     item: LmsLibraryItem,
     connection: LmsServerConnection?,
+    isSearchResults: Boolean,
     isPlayingItem: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit
 ) {
     Column(Modifier.padding(8.dp).clickable(onClick = onOpen)) {
+        val subtitle = item.displaySubtitle(isSearchResults)
         LibraryArtwork(
             item,
             connection,
+            isSearchResults,
             onResolveArtistArtwork,
             Modifier.fillMaxWidth().aspectRatio(1f)
         )
         Text(item.title, maxLines = 1, style = MaterialTheme.typography.titleSmall)
-        item.artist?.let { Text(it, maxLines = 1, style = MaterialTheme.typography.bodySmall) }
-        if (item.canPlay()) {
-            TextButton(onClick = onPlayNow, enabled = !isPlayingItem) { Text("Play") }
+        if (subtitle.isNotBlank()) {
+            Text(subtitle, maxLines = 1, style = MaterialTheme.typography.bodySmall)
         }
+        if (item.canPlay()) {
+            LibraryPlayButton(item.title, isPlayingItem, onPlayNow)
+        }
+    }
+}
+
+@Composable
+private fun LibraryPlayButton(
+    itemTitle: String,
+    isPlayingItem: Boolean,
+    onPlayNow: () -> Unit
+) {
+    IconButton(
+        onClick = onPlayNow,
+        enabled = !isPlayingItem,
+        modifier = Modifier.semantics {
+            contentDescription = "Play $itemTitle"
+        }
+    ) {
+        LibraryGlyphIcon(
+            LibraryGlyph.PLAY,
+            MaterialTheme.colorScheme.primary,
+            Modifier.size(24.dp)
+        )
     }
 }
 
@@ -713,6 +742,7 @@ private fun LibraryItemCard(
 private fun LibraryArtwork(
     item: LmsLibraryItem,
     connection: LmsServerConnection?,
+    showTypeLabel: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
     modifier: Modifier
 ) {
@@ -770,7 +800,15 @@ private fun LibraryArtwork(
             contentDescription = "${item.title} artwork",
             modifier = Modifier.fillMaxSize()
         ) {
-            Text(item.type.displayName(), style = MaterialTheme.typography.labelSmall)
+            if (showTypeLabel) {
+                Text(item.type.displayName(), style = MaterialTheme.typography.labelSmall)
+            } else {
+                LibraryGlyphIcon(
+                    LibraryGlyph.MUSIC,
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                    Modifier.size(24.dp)
+                )
+            }
         }
     }
 }
@@ -787,8 +825,20 @@ private fun logArtistArtworkLookupFailure(exception: Exception) {
 private const val LIBRARY_ARTWORK_LOG_TAG = "LmsArtwork"
 
 private fun LmsLibraryItem.canPlay(): Boolean = !isContainer && type in setOf(
-    LmsLibraryItemType.ALBUM, LmsLibraryItemType.TRACK, LmsLibraryItemType.PLAYLIST
+    LmsLibraryItemType.ARTIST,
+    LmsLibraryItemType.ALBUM,
+    LmsLibraryItemType.GENRE,
+    LmsLibraryItemType.TRACK,
+    LmsLibraryItemType.PLAYLIST
 )
+
+private fun LmsLibraryItem.displaySubtitle(showTypeLabel: Boolean): String = listOfNotNull(
+    type.displayName().takeIf { showTypeLabel },
+    artist?.takeUnless { it == title },
+    album,
+    year?.takeIf { type == LmsLibraryItemType.ALBUM },
+    durationSeconds?.let(::formatDuration)
+).joinToString(" · ")
 
 private fun LibraryLayout.displayName(): String = when (this) {
     LibraryLayout.COVER_WALL -> "Cover wall"
@@ -822,7 +872,8 @@ private fun LibraryLayoutSelector(
                     checked = selected,
                     onCheckedChange = { if (it) onSelect(option) },
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(40.dp)
+                        .testTag("library-layout-option-${option.name}")
                         .clip(segmentShape)
                         .background(
                             if (selected) MaterialTheme.colorScheme.secondaryContainer
@@ -843,7 +894,8 @@ private fun LibraryLayoutSelector(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
+                            .testTag("library-layout-glyph-${option.name}")
                     )
                 }
             }
@@ -1245,6 +1297,25 @@ private fun Player?.readPlayerStripState(
     )
 }
 
+@Composable
+internal fun PlayerControlsPlaybackButton(
+    isPlaying: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.semantics {
+            contentDescription = if (isPlaying) "Pause playback" else "Play playback"
+        }
+    ) {
+        LibraryGlyphIcon(
+            if (isPlaying) LibraryGlyph.PAUSE else LibraryGlyph.PLAY,
+            MaterialTheme.colorScheme.onSurface,
+            Modifier.size(24.dp)
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlayerControlsSheet(
@@ -1282,7 +1353,8 @@ private fun PlayerControlsSheet(
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 TextButton(onClick = { onCommand(LmsPlayerCommand.Previous) }) { Text("Previous") }
-                TextButton(
+                PlayerControlsPlaybackButton(
+                    isPlaying = status?.mode == LmsPlaybackMode.PLAYING,
                     onClick = {
                         onCommand(
                             if (status?.mode == LmsPlaybackMode.PLAYING) {
@@ -1292,7 +1364,7 @@ private fun PlayerControlsSheet(
                             }
                         )
                     }
-                ) { Text(if (status?.mode == LmsPlaybackMode.PLAYING) "Pause" else "Play") }
+                )
                 TextButton(onClick = { onCommand(LmsPlayerCommand.Next) }) { Text("Next") }
             }
             connectionState.playerMixerState?.let { mixer ->

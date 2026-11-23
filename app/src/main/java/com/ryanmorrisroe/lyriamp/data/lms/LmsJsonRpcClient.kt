@@ -148,24 +148,50 @@ class LmsJsonRpcClient(
         validateLibraryPage(offset, limit)
         require(term.isNotBlank()) { "Enter a search term." }
         val result = request(connection, "", librarySearchCommand(term, offset, limit))
+        val artists = result.searchPage(
+            loopName = "contributors_loop",
+            countField = "contributors_count",
+            idField = "contributor_id",
+            titleField = "contributor",
+            itemType = LmsLibraryItemType.ARTIST,
+            offset = offset
+        )
+        val albums = result.searchPage(
+            loopName = "albums_loop",
+            countField = "albums_count",
+            idField = "album_id",
+            titleField = "album",
+            itemType = LmsLibraryItemType.ALBUM,
+            offset = offset,
+            artworkIdFields = arrayOf("artwork", "artwork_track_id")
+        )
+        val albumIds = albums.items.map { it.id }.distinct()
+        val albumMetadataById = if (albumIds.isEmpty()) {
+            emptyMap()
+        } else {
+            getPage(
+                connection = connection,
+                query = LmsLibraryQuery.ALBUMS,
+                offset = 0,
+                limit = albumIds.size,
+                filter = LmsLibraryFilter(albumId = albumIds.joinToString(",")),
+                search = null
+            ).items.associateBy { it.id }
+        }
+        val enrichedAlbums = albums.copy(
+            items = albums.items.map { item ->
+                val metadata = albumMetadataById[item.id] ?: return@map item
+                item.copy(
+                    artist = metadata.artist ?: item.artist,
+                    artworkId = item.artworkId ?: metadata.artworkId,
+                    artworkUrl = item.artworkUrl ?: metadata.artworkUrl,
+                    year = metadata.year ?: item.year
+                )
+            }
+        )
         return LmsLibrarySearchResults(
-            artists = result.searchPage(
-                loopName = "contributors_loop",
-                countField = "contributors_count",
-                idField = "contributor_id",
-                titleField = "contributor",
-                itemType = LmsLibraryItemType.ARTIST,
-                offset = offset
-            ),
-            albums = result.searchPage(
-                loopName = "albums_loop",
-                countField = "albums_count",
-                idField = "album_id",
-                titleField = "album",
-                itemType = LmsLibraryItemType.ALBUM,
-                offset = offset,
-                artworkIdFields = arrayOf("artwork")
-            ),
+            artists = artists,
+            albums = enrichedAlbums,
             tracks = result.searchPage(
                 loopName = "tracks_loop",
                 countField = "tracks_count",
@@ -214,10 +240,17 @@ class LmsJsonRpcClient(
             LmsLibraryItemType.TRACK -> "track_id"
             LmsLibraryItemType.ALBUM -> "album_id"
             LmsLibraryItemType.PLAYLIST -> "playlist_id"
-            LmsLibraryItemType.ARTIST,
-            LmsLibraryItemType.GENRE -> throw IllegalArgumentException("This library item cannot be played directly.")
+            LmsLibraryItemType.ARTIST -> "artist_id"
+            LmsLibraryItemType.GENRE -> "genre_id"
         }
-        request(connection, playerId, playlistControlCommand("load", filterName, item.id))
+        val sort = if (item.type == LmsLibraryItemType.ARTIST ||
+            item.type == LmsLibraryItemType.GENRE
+        ) {
+            "album"
+        } else {
+            null
+        }
+        request(connection, playerId, playlistControlCommand("load", filterName, item.id, sort))
     }
 
     override suspend fun getPlayerStatus(
@@ -376,7 +409,7 @@ class LmsJsonRpcClient(
         add(JsonPrimitive(offset))
         add(JsonPrimitive(limit))
         when (query) {
-            LmsLibraryQuery.ALBUMS -> add(JsonPrimitive("tags:aljK"))
+            LmsLibraryQuery.ALBUMS -> add(JsonPrimitive("tags:aljKy"))
             LmsLibraryQuery.TRACKS,
             LmsLibraryQuery.PLAYLIST_TRACKS -> add(JsonPrimitive("tags:galdeKJc"))
             LmsLibraryQuery.PLAYLISTS -> add(JsonPrimitive("tags:suxKJc"))
@@ -404,10 +437,16 @@ class LmsJsonRpcClient(
         add(JsonPrimitive("artist_id:$artistId"))
     }
 
-    private fun playlistControlCommand(action: String, filterName: String, id: String) = buildJsonArray {
+    private fun playlistControlCommand(
+        action: String,
+        filterName: String,
+        id: String,
+        sort: String? = null
+    ) = buildJsonArray {
         add(JsonPrimitive("playlistcontrol"))
         add(JsonPrimitive("cmd:$action"))
         add(JsonPrimitive("$filterName:$id"))
+        sort?.let { add(JsonPrimitive("sort:$it")) }
     }
 
     private fun validateLibraryPage(offset: Int, limit: Int) {
@@ -520,7 +559,8 @@ class LmsJsonRpcClient(
             isContainer = detectContainer && (
                 this["type"].asText() == "folder" ||
                     id.startsWith("file:", ignoreCase = true) || '/' in id || '\\' in id
-                )
+                ),
+            year = this["year"].asText()?.takeIf(String::isNotBlank)
         )
     }
 

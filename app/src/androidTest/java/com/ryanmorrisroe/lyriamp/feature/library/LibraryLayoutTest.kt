@@ -1,6 +1,7 @@
 package com.ryanmorrisroe.lyriamp.feature.library
 
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -11,6 +12,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.mutableStateOf
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayer
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayerStore
 import com.ryanmorrisroe.lyriamp.data.lms.LmsConnectionGateway
@@ -113,6 +116,119 @@ class LibraryLayoutTest {
     }
 
     @Test
+    fun playerControlsPlayActionUsesAnAccessibleIcon() {
+        var playbackStarted = false
+        val isPlaying = mutableStateOf(false)
+        compose.setContent {
+            LyriampTheme(dynamicColor = false) {
+                PlayerControlsPlaybackButton(isPlaying = isPlaying.value) {
+                    playbackStarted = true
+                    isPlaying.value = true
+                }
+            }
+        }
+
+        compose.onNodeWithContentDescription("Play playback").performClick()
+        compose.onNodeWithText("Play", useUnmergedTree = true).assertDoesNotExist()
+        compose.runOnIdle { assertTrue(playbackStarted) }
+        compose.onNodeWithContentDescription("Pause playback").fetchSemanticsNode()
+
+        compose.onNodeWithContentDescription("Pause playback").fetchSemanticsNode()
+    }
+
+    @Test
+    fun dedicatedListsUsePlayIconsWithoutTypeLabels() {
+        showLibrary(FakeDisplayPreferences())
+
+        compose.onAllNodesWithText("Artists").onFirst().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Artist 0").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Play Artist 0").fetchSemanticsNode()
+        compose.onNodeWithText("Artist", useUnmergedTree = true).assertDoesNotExist()
+        assertEquals(
+            1,
+            compose.onAllNodesWithText("Artist 0", useUnmergedTree = true)
+                .fetchSemanticsNodes().size
+        )
+
+        compose.onAllNodesWithText("Genres").onFirst().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Genre 0").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Play Genre 0").fetchSemanticsNode()
+        compose.onNodeWithText("Genre", useUnmergedTree = true).assertDoesNotExist()
+
+        compose.onAllNodesWithText("Albums").onFirst().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Album 0").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Play Album 0").fetchSemanticsNode()
+        compose.onNodeWithText("Album", useUnmergedTree = true).assertDoesNotExist()
+        compose.onAllNodesWithText("Album Artist · 1999", useUnmergedTree = true)
+            .onFirst().fetchSemanticsNode()
+        compose.onNodeWithTag("library-layout-option-COVER_WALL")
+            .assertWidthIsEqualTo(40.dp)
+        compose.onNodeWithTag("library-layout-glyph-COVER_WALL", useUnmergedTree = true)
+            .assertWidthIsEqualTo(22.dp)
+
+        compose.onAllNodesWithText("Songs").onFirst().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Song 0").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Play Song 0").fetchSemanticsNode()
+        compose.onNodeWithText("Track", useUnmergedTree = true).assertDoesNotExist()
+
+        compose.onAllNodesWithText("Playlists").onFirst().performScrollTo().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Playlist 0").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Play Playlist 0").fetchSemanticsNode()
+        compose.onNodeWithText("Playlist", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun albumRowsKeepYearWhenOpenedFromAnArtist() {
+        showLibrary(FakeDisplayPreferences())
+
+        compose.onAllNodesWithText("Artists").onFirst().performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Artist 0").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Artist 0").performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Album 0").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onAllNodesWithText("Album Artist · 1999", useUnmergedTree = true)
+            .onFirst().fetchSemanticsNode()
+        compose.onNodeWithText("Album", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun mixedSearchResultsKeepItemTypeLabels() {
+        val gateway = showLibrary(FakeDisplayPreferences(), searchText = "mixed")
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Search Artist").fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodesWithText("Search Album").fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodesWithText("Search Track").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onAllNodesWithText("Artist", useUnmergedTree = true).onFirst().fetchSemanticsNode()
+        compose.onNodeWithText("Artist · Search Artist", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText(
+            "Album · Album Artist · 2001",
+            useUnmergedTree = true
+        ).fetchSemanticsNode()
+        compose.onNodeWithText(
+            "Track · Track Artist · Track Album · 3:00",
+            useUnmergedTree = true
+        ).fetchSemanticsNode()
+        compose.onNodeWithContentDescription("Play Search Artist").fetchSemanticsNode()
+        compose.waitUntil(10_000) { gateway.artistArtworkRequests.get() > 0 }
+    }
+
+    @Test
     fun settingsOfferAppearanceAndConnections() {
         val preferences = FakeDisplayPreferences()
         val display = DisplayPreferencesViewModel(preferences)
@@ -184,10 +300,12 @@ class LibraryLayoutTest {
         connection: ConnectionViewModel = run {
             val client = LmsJsonRpcClient(httpClient)
             ConnectionViewModel(client, client, client, store)
-        }
+        },
+        searchText: String = ""
     ): FakeLibrary {
         val gateway = FakeLibrary()
         val library = LibraryViewModel(gateway, store)
+        if (searchText.isNotBlank()) library.setSearchText(searchText)
         val display = DisplayPreferencesViewModel(preferences)
         compose.setContent {
             LyriampTheme(dynamicColor = false) {
@@ -264,6 +382,7 @@ class LibraryLayoutTest {
 
     private class FakeLibrary : LmsLibraryGateway {
         val requests = CopyOnWriteArrayList<Pair<LmsLibraryQuery, Int>>()
+        val artistArtworkRequests = AtomicInteger()
 
         override suspend fun getPage(
             connection: LmsServerConnection,
@@ -291,7 +410,17 @@ class LibraryLayoutTest {
             val count = 100001
             return LmsLibraryPage(
                 (offset until minOf(offset + limit, count)).map {
-                    LmsLibraryItem(it.toString(), type, "$title $it")
+                    LmsLibraryItem(
+                        id = it.toString(),
+                        type = type,
+                        title = "$title $it",
+                        artist = when (type) {
+                            LmsLibraryItemType.ARTIST -> "$title $it"
+                            LmsLibraryItemType.ALBUM -> "Album Artist"
+                            else -> null
+                        },
+                        year = if (type == LmsLibraryItemType.ALBUM) "1999" else null
+                    )
                 },
                 offset,
                 count
@@ -304,8 +433,62 @@ class LibraryLayoutTest {
             offset: Int,
             limit: Int
         ): LmsLibrarySearchResults {
-            val empty = LmsLibraryPage(emptyList(), offset, 0)
-            return LmsLibrarySearchResults(empty, empty, empty)
+            fun page(
+                type: LmsLibraryItemType,
+                title: String,
+                year: String? = null,
+                artist: String? = null,
+                album: String? = null,
+                durationSeconds: Double? = null
+            ) =
+                LmsLibraryPage(
+                    items = if (offset == 0) {
+                        listOf(
+                            LmsLibraryItem(
+                                id = "search-${type.name}",
+                                type = type,
+                                title = title,
+                                artist = artist,
+                                album = album,
+                                durationSeconds = durationSeconds,
+                                year = year
+                            )
+                        )
+                    } else {
+                        emptyList()
+                    },
+                    offset = offset,
+                    totalCount = 1
+                )
+
+            return LmsLibrarySearchResults(
+                artists = page(
+                    LmsLibraryItemType.ARTIST,
+                    "Search Artist",
+                    artist = "Search Artist"
+                ),
+                albums = page(
+                    LmsLibraryItemType.ALBUM,
+                    "Search Album",
+                    year = "2001",
+                    artist = "Album Artist"
+                ),
+                tracks = page(
+                    LmsLibraryItemType.TRACK,
+                    "Search Track",
+                    artist = "Track Artist",
+                    album = "Track Album",
+                    durationSeconds = 180.0
+                )
+            )
+        }
+
+        override suspend fun getArtistArtworkUrl(
+            connection: LmsServerConnection,
+            artistId: String
+        ): String? {
+            artistArtworkRequests.incrementAndGet()
+            return null
         }
 
         override suspend fun playNow(connection: LmsServerConnection, playerId: String, item: LmsLibraryItem) = Unit
