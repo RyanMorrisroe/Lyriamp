@@ -30,6 +30,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionLocation
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionSnapshot
@@ -43,6 +44,7 @@ import com.ryanmorrisroe.lyriamp.feature.library.LibraryLocation
 import com.ryanmorrisroe.lyriamp.feature.library.LibraryViewModel
 import com.ryanmorrisroe.lyriamp.feature.library.libraryLocationKey
 import com.ryanmorrisroe.lyriamp.feature.player.NowPlayingScreen
+import com.ryanmorrisroe.lyriamp.feature.player.PlayerQueueScreen
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
 import com.ryanmorrisroe.lyriamp.feature.settings.SettingsScreen
 import kotlinx.coroutines.launch
@@ -225,7 +227,16 @@ fun LyriampAppNavigation(
                 onChangeServer = ::openConnections
             )
         }
-        composable(LIBRARY_ROUTE) {
+        composable(
+            route = LIBRARY_DESTINATION_ROUTE,
+            arguments = listOf(
+                navArgument(QUEUE_PICKER_ARGUMENT) {
+                    type = NavType.BoolType
+                    defaultValue = false
+                }
+            )
+        ) { entry ->
+            val queuePickerMode = entry.arguments?.getBoolean(QUEUE_PICKER_ARGUMENT) ?: false
             LibraryScreen(
                 viewModel = libraryViewModel,
                 connectionViewModel = connectionViewModel,
@@ -238,6 +249,12 @@ fun LyriampAppNavigation(
                 onOpenNowPlaying = { navController.navigate(NOW_PLAYING_ROUTE) },
                 sessionError = sessionSaveError,
                 onRetrySessionSave = { failedSnapshot?.let { sessionSaves.trySend(it) } },
+                queuePickerMode = queuePickerMode,
+                onBackFromQueuePicker = {
+                    if (!navController.popBackStack(NOW_PLAYING_ROUTE, inclusive = false)) {
+                        navController.popBackStack()
+                    }
+                },
                 onLibraryStateChanged = { locations, searchText, anchor ->
                     val player = libraryViewModel.uiState.value.activePlayer
                     val profileId = connectionViewModel.uiState.value.serverProfileId
@@ -281,6 +298,33 @@ fun LyriampAppNavigation(
                 onBack = { navController.popBackStack() },
                 onChoosePlayer = {
                     navController.navigate("$PLAYER_SELECTION_ROUTE?origin=now-playing")
+                },
+                onAddToQueue = { navController.navigate(QUEUE_PICKER_ROUTE) },
+                onOpenQueue = { navController.navigate(PLAYER_QUEUE_ROUTE) },
+                onOpenArtist = { title ->
+                    if (!navController.popBackStack(LIBRARY_ROUTE, inclusive = false)) {
+                        libraryViewModel.resetToRoot()
+                        openLibraryAsRoot()
+                    }
+                    libraryViewModel.openMetadataItem(LmsLibraryItemType.ARTIST, title)
+                },
+                onOpenAlbum = { title ->
+                    if (!navController.popBackStack(LIBRARY_ROUTE, inclusive = false)) {
+                        libraryViewModel.resetToRoot()
+                        openLibraryAsRoot()
+                    }
+                    libraryViewModel.openMetadataItem(LmsLibraryItemType.ALBUM, title)
+                }
+            )
+        }
+        composable(PLAYER_QUEUE_ROUTE) {
+            PlayerQueueScreen(
+                connectionViewModel = connectionViewModel,
+                onBack = { navController.popBackStack() },
+                onAddToQueue = {
+                    navController.navigate(QUEUE_PICKER_ROUTE) {
+                        popUpTo(NOW_PLAYING_ROUTE) { inclusive = false }
+                    }
                 }
             )
         }
@@ -291,8 +335,12 @@ private const val CONNECTIONS_ROUTE = "connections"
 private const val RESTORING_ROUTE = "restoring"
 private const val SERVER_SETUP_ROUTE = "server-setup"
 private const val PLAYER_SELECTION_ROUTE = "player-selection"
-private const val LIBRARY_ROUTE = "library"
+private const val QUEUE_PICKER_ARGUMENT = "queuePicker"
+private const val LIBRARY_DESTINATION_ROUTE = "library?queuePicker={$QUEUE_PICKER_ARGUMENT}"
+private const val LIBRARY_ROUTE = "library?queuePicker=false"
+private const val QUEUE_PICKER_ROUTE = "library?queuePicker=true"
 private const val NOW_PLAYING_ROUTE = "now-playing"
+private const val PLAYER_QUEUE_ROUTE = "player-queue"
 private const val SETTINGS_ROUTE = "settings"
 private const val PROFILE_ID_ARGUMENT = "profileId"
 private const val ORIGIN_ARGUMENT = "origin"

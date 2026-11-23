@@ -4,16 +4,21 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsConnectionGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayerStore
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayer
 import com.ryanmorrisroe.lyriamp.data.lms.LmsHttpException
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItem
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayer
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerMixerState
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerPlaybackOptions
+import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerQueuePage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerDirectory
 import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerRemoteGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
+import com.ryanmorrisroe.lyriamp.data.lms.LmsQueueAddPosition
+import com.ryanmorrisroe.lyriamp.data.lms.LmsQueueItem
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerInfo
 import com.ryanmorrisroe.lyriamp.data.persistence.SavedServerProfile
@@ -226,7 +231,7 @@ class ConnectionViewModelTest {
             var mixerStateRequestCount = 0
             var playbackOptionsRequestCount = 0
             var shuffleMode = LmsShuffleMode.OFF
-            val remoteGateway = object : LmsPlayerRemoteGateway {
+            val remoteGateway = object : TestPlayerRemoteGateway() {
                 override suspend fun getPlayerStatus(
                     connection: LmsServerConnection,
                     playerId: String
@@ -337,7 +342,7 @@ class ConnectionViewModelTest {
     fun refreshingPlayerStatusPublishesTheLatestPosition() {
         runViewModelTest {
             var positionSeconds = 12.0
-            val remoteGateway = object : LmsPlayerRemoteGateway {
+            val remoteGateway = object : TestPlayerRemoteGateway() {
                 override suspend fun getPlayerStatus(
                     connection: LmsServerConnection,
                     playerId: String
@@ -388,9 +393,308 @@ class ConnectionViewModelTest {
     }
 
     @Test
+    fun queueMutationsProtectCurrentTrackAndRefreshAbsoluteIndexes() {
+        runViewModelTest {
+            var currentIndex = 0
+            var queue = mutableListOf(
+                LmsQueueItem(0, "current", "Current", "Artist", "Album", 100.0, null, null),
+                LmsQueueItem(1, "next", "Next", "Artist", "Album", 110.0, null, null),
+                LmsQueueItem(2, "later", "Later", "Artist", "Album", 120.0, null, null)
+            )
+            val mutations = mutableListOf<String>()
+            val remoteGateway = object : TestPlayerRemoteGateway() {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerStatus(
+                    LmsPlaybackMode.PLAYING,
+                    "Current",
+                    "Artist",
+                    "Album",
+                    0.0,
+                    100.0,
+                    true,
+                    playlistIndex = currentIndex,
+                    trackId = "current"
+                )
+
+                override suspend fun getPlayerQueue(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    offset: Int,
+                    limit: Int
+                ): LmsPlayerQueuePage {
+                    val indexedQueue = queue.mapIndexed { index, item -> item.copy(index = index) }
+                    return LmsPlayerQueuePage(
+                        indexedQueue.drop(offset).take(limit),
+                        offset,
+                        indexedQueue.size,
+                        currentIndex
+                    )
+                }
+
+                override suspend fun addQueueItem(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    item: LmsLibraryItem,
+                    position: LmsQueueAddPosition
+                ) {
+                    mutations += "add:${position.name}:${item.id}"
+                    val target = LmsQueueItem(
+                        queue.size,
+                        item.id,
+                        item.title,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                    )
+                    val insertionIndex = if (position == LmsQueueAddPosition.NEXT) currentIndex + 1 else queue.size
+                    queue.add(insertionIndex, target)
+                }
+
+                override suspend fun removeQueueItem(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    index: Int
+                ) {
+                    mutations += "remove:$index"
+                    queue.removeAt(index)
+                    if (index < currentIndex) currentIndex--
+                }
+
+                override suspend fun moveQueueItem(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    fromIndex: Int,
+                    toIndex: Int
+                ) {
+                    mutations += "move:$fromIndex:$toIndex"
+                    queue.add(toIndex, queue.removeAt(fromIndex))
+                }
+            }
+            val viewModel = connectedViewModel(remoteGateway)
+            advanceUntilIdle()
+            viewModel.selectPlayer("aa:bb")
+            advanceUntilIdle()
+            assertEquals(3, viewModel.uiState.value.playerQueueTotalCount)
+
+            viewModel.removePlayerQueueItem(0)
+            advanceUntilIdle()
+            assertTrue(mutations.isEmpty())
+
+            viewModel.removePlayerQueueItem(1)
+            advanceUntilIdle()
+            viewModel.addPlayerQueueItem(
+                LmsLibraryItem("end", LmsLibraryItemType.TRACK, "End"),
+                LmsQueueAddPosition.END
+            )
+            advanceUntilIdle()
+            viewModel.addPlayerQueueItem(
+                LmsLibraryItem("next", LmsLibraryItemType.TRACK, "Next up"),
+                LmsQueueAddPosition.NEXT
+            )
+            advanceUntilIdle()
+            viewModel.movePlayerQueueItem(fromIndex = 3, toIndex = 2)
+            advanceUntilIdle()
+
+            assertEquals(listOf("remove:1", "add:END:end", "add:NEXT:next", "move:3:2"), mutations)
+            assertEquals(listOf("Current", "Next up", "End", "Later"), queue.map { it.title })
+            assertEquals(0, viewModel.uiState.value.playerQueueCurrentIndex)
+            assertEquals(4, viewModel.uiState.value.playerQueueTotalCount)
+            assertFalse(viewModel.uiState.value.isMutatingPlayerQueue)
+        }
+    }
+
+    @Test
+    fun queueRefreshStartsAtTheNewCurrentTrackAfterPlaybackAdvances() {
+        runViewModelTest {
+            var currentIndex = 0
+            var currentTrackId = "track-0"
+            val offsets = mutableListOf<Int>()
+            val queue = listOf(
+                LmsQueueItem(0, "track-0", "Track 0", null, null, null, null, null),
+                LmsQueueItem(1, "track-1", "Track 1", null, null, null, null, null),
+                LmsQueueItem(2, "track-2", "Track 2", null, null, null, null, null)
+            )
+            val remoteGateway = object : TestPlayerRemoteGateway() {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerStatus(
+                    LmsPlaybackMode.PLAYING,
+                    "Track $currentIndex",
+                    null,
+                    null,
+                    0.0,
+                    100.0,
+                    true,
+                    playlistIndex = currentIndex,
+                    trackId = currentTrackId
+                )
+
+                override suspend fun getPlayerQueue(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    offset: Int,
+                    limit: Int
+                ): LmsPlayerQueuePage {
+                    offsets += offset
+                    return LmsPlayerQueuePage(
+                        queue.drop(offset).take(limit),
+                        offset,
+                        queue.size,
+                        currentIndex
+                    )
+                }
+            }
+            val viewModel = connectedViewModel(remoteGateway)
+            advanceUntilIdle()
+            viewModel.selectPlayer("aa:bb")
+            advanceUntilIdle()
+
+            currentIndex = 1
+            currentTrackId = "track-1"
+            viewModel.refreshPlayerStatus()
+
+            assertEquals(listOf(0, 1), offsets)
+            assertEquals(1, viewModel.uiState.value.playerQueueOffset)
+            assertEquals(listOf(1, 2), viewModel.uiState.value.playerQueue.map { it.index })
+        }
+    }
+
+    @Test
+    fun fullQueueLoadsAdditionalBoundedPages() {
+        runViewModelTest {
+            val queue = (0 until 150).map { index ->
+                LmsQueueItem(index, "track-$index", "Track $index", null, null, null, null, null)
+            }
+            val offsets = mutableListOf<Int>()
+            val remoteGateway = object : TestPlayerRemoteGateway() {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerStatus(
+                    LmsPlaybackMode.PLAYING,
+                    "Track 0",
+                    null,
+                    null,
+                    0.0,
+                    100.0,
+                    true,
+                    playlistIndex = 0,
+                    trackId = "track-0"
+                )
+
+                override suspend fun getPlayerQueue(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    offset: Int,
+                    limit: Int
+                ): LmsPlayerQueuePage {
+                    offsets += offset
+                    assertEquals(100, limit)
+                    return LmsPlayerQueuePage(queue.drop(offset).take(limit), offset, queue.size, 0)
+                }
+            }
+            val viewModel = connectedViewModel(remoteGateway)
+            advanceUntilIdle()
+            viewModel.selectPlayer("aa:bb")
+            advanceUntilIdle()
+            assertEquals(100, viewModel.uiState.value.playerQueue.size)
+
+            viewModel.loadMorePlayerQueue()
+            advanceUntilIdle()
+
+            assertEquals(listOf(0, 100), offsets)
+            assertEquals(150, viewModel.uiState.value.playerQueue.size)
+            assertEquals(150, viewModel.uiState.value.playerQueueTotalCount)
+            assertEquals(listOf(100, 149), listOf(
+                viewModel.uiState.value.playerQueue[100].index,
+                viewModel.uiState.value.playerQueue.last().index
+            ))
+        }
+    }
+
+    @Test
+    fun queueMutationAndRefreshFailuresAreReportedAndClearPendingState() {
+        runViewModelTest {
+            var failMutation = true
+            var failQueueRefresh = false
+            var queueSize = 1
+            val remoteGateway = object : TestPlayerRemoteGateway() {
+                override suspend fun getPlayerStatus(
+                    connection: LmsServerConnection,
+                    playerId: String
+                ) = LmsPlayerStatus(
+                    LmsPlaybackMode.PLAYING,
+                    "Current",
+                    null,
+                    null,
+                    0.0,
+                    100.0,
+                    true,
+                    playlistIndex = 0,
+                    trackId = "current"
+                )
+
+                override suspend fun getPlayerQueue(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    offset: Int,
+                    limit: Int
+                ): LmsPlayerQueuePage {
+                    if (failQueueRefresh) error("queue unavailable")
+                    return LmsPlayerQueuePage(
+                        listOf(LmsQueueItem(0, "current", "Current", null, null, null, null, null))
+                            .take(queueSize),
+                        offset,
+                        queueSize,
+                        0
+                    )
+                }
+
+                override suspend fun addQueueItem(
+                    connection: LmsServerConnection,
+                    playerId: String,
+                    item: LmsLibraryItem,
+                    position: LmsQueueAddPosition
+                ) {
+                    if (failMutation) error("mutation failed")
+                    queueSize++
+                }
+            }
+            val viewModel = connectedViewModel(remoteGateway)
+            advanceUntilIdle()
+            viewModel.selectPlayer("aa:bb")
+            advanceUntilIdle()
+
+            viewModel.addPlayerQueueItem(
+                LmsLibraryItem("new", LmsLibraryItemType.TRACK, "New"),
+                LmsQueueAddPosition.END
+            )
+            advanceUntilIdle()
+            assertEquals("Could not update this player's queue.", viewModel.uiState.value.playerQueueErrorMessage)
+            assertFalse(viewModel.uiState.value.isMutatingPlayerQueue)
+
+            failMutation = false
+            failQueueRefresh = true
+            viewModel.addPlayerQueueItem(
+                LmsLibraryItem("new", LmsLibraryItemType.TRACK, "New"),
+                LmsQueueAddPosition.END
+            )
+            advanceUntilIdle()
+            assertEquals("The queue changed, but could not be refreshed.", viewModel.uiState.value.playerQueueErrorMessage)
+            assertFalse(viewModel.uiState.value.isLoadingPlayerQueue)
+            assertFalse(viewModel.uiState.value.isMutatingPlayerQueue)
+        }
+    }
+
+    @Test
     fun playerReadFailuresAreReportedIndependentlyAndOnRefresh() {
         runViewModelTest {
-            val remoteGateway = object : LmsPlayerRemoteGateway {
+            val remoteGateway = object : TestPlayerRemoteGateway() {
                 override suspend fun getPlayerStatus(
                     connection: LmsServerConnection,
                     playerId: String
@@ -437,7 +741,7 @@ class ConnectionViewModelTest {
     @Test
     fun commandAndPowerFailuresClearPendingStateAndReportErrors() {
         runViewModelTest {
-            val remoteGateway = object : LmsPlayerRemoteGateway {
+            val remoteGateway = object : TestPlayerRemoteGateway() {
                 override suspend fun getPlayerStatus(
                     connection: LmsServerConnection,
                     playerId: String
@@ -488,7 +792,7 @@ class ConnectionViewModelTest {
         runViewModelTest {
             var poweredOn = true
             val activePlayerStore = LmsActivePlayerStore()
-            val remoteGateway = object : LmsPlayerRemoteGateway {
+            val remoteGateway = object : TestPlayerRemoteGateway() {
                 override suspend fun getPlayerStatus(
                     connection: LmsServerConnection,
                     playerId: String
@@ -538,7 +842,57 @@ class ConnectionViewModelTest {
         }
     }
 
-    private fun unusedPlayerRemoteGateway() = object : LmsPlayerRemoteGateway {
+    private abstract class TestPlayerRemoteGateway : LmsPlayerRemoteGateway {
+        override suspend fun getPlayerStatus(
+            connection: LmsServerConnection,
+            playerId: String
+        ): LmsPlayerStatus = error("Unexpected player status request")
+
+        override suspend fun getPlayerMixerState(
+            connection: LmsServerConnection,
+            playerId: String
+        ) = LmsPlayerMixerState(50, false)
+
+        override suspend fun getPlayerPlaybackOptions(
+            connection: LmsServerConnection,
+            playerId: String
+        ) = LmsPlayerPlaybackOptions(LmsShuffleMode.OFF, LmsRepeatMode.OFF)
+
+        override suspend fun sendCommand(
+            connection: LmsServerConnection,
+            playerId: String,
+            command: LmsPlayerCommand
+        ): Unit = error("Unexpected player command")
+
+        override suspend fun getPlayerQueue(
+            connection: LmsServerConnection,
+            playerId: String,
+            offset: Int,
+            limit: Int
+        ) = LmsPlayerQueuePage(emptyList(), offset, 0, null)
+
+        override suspend fun addQueueItem(
+            connection: LmsServerConnection,
+            playerId: String,
+            item: LmsLibraryItem,
+            position: LmsQueueAddPosition
+        ) = Unit
+
+        override suspend fun removeQueueItem(
+            connection: LmsServerConnection,
+            playerId: String,
+            index: Int
+        ) = Unit
+
+        override suspend fun moveQueueItem(
+            connection: LmsServerConnection,
+            playerId: String,
+            fromIndex: Int,
+            toIndex: Int
+        ) = Unit
+    }
+
+    private fun unusedPlayerRemoteGateway() = object : TestPlayerRemoteGateway() {
         override suspend fun getPlayerStatus(
             connection: LmsServerConnection,
             playerId: String

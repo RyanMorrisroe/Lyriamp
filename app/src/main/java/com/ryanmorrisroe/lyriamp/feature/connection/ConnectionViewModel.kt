@@ -7,13 +7,17 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsConnectionGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayer
 import com.ryanmorrisroe.lyriamp.data.lms.LmsActivePlayerStore
 import com.ryanmorrisroe.lyriamp.data.lms.LmsHttpException
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItem
 import com.ryanmorrisroe.lyriamp.data.lms.LmsProtocolException
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayer
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerMixerState
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerPlaybackOptions
+import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerQueuePage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerDirectory
+import com.ryanmorrisroe.lyriamp.data.lms.LmsQueueAddPosition
+import com.ryanmorrisroe.lyriamp.data.lms.LmsQueueItem
 import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerRemoteGateway
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
@@ -43,13 +47,20 @@ data class ConnectionUiState(
     val playerStatus: LmsPlayerStatus? = null,
     val playerMixerState: LmsPlayerMixerState? = null,
     val playerPlaybackOptions: LmsPlayerPlaybackOptions? = null,
+    val playerQueue: List<LmsQueueItem> = emptyList(),
+    val playerQueueOffset: Int = 0,
+    val playerQueueTotalCount: Int = 0,
+    val playerQueueCurrentIndex: Int? = null,
     val isLoadingPlayerStatus: Boolean = false,
     val isLoadingMixerState: Boolean = false,
     val isLoadingPlaybackOptions: Boolean = false,
+    val isLoadingPlayerQueue: Boolean = false,
     val isSendingPlayerCommand: Boolean = false,
+    val isMutatingPlayerQueue: Boolean = false,
     val playerErrorMessage: String? = null,
     val playerMixerErrorMessage: String? = null,
     val playerPlaybackOptionsErrorMessage: String? = null,
+    val playerQueueErrorMessage: String? = null,
     val powerUpdatingPlayerId: String? = null,
     val playerPowerErrorMessage: String? = null,
     val errorMessage: String? = null,
@@ -197,13 +208,20 @@ class ConnectionViewModel(
                         playerStatus = null,
                         playerMixerState = null,
                         playerPlaybackOptions = null,
+                        playerQueue = emptyList(),
+                        playerQueueOffset = 0,
+                        playerQueueTotalCount = 0,
+                        playerQueueCurrentIndex = null,
                         isLoadingPlayerStatus = false,
                         isLoadingMixerState = false,
                         isLoadingPlaybackOptions = false,
+                        isLoadingPlayerQueue = false,
                         isSendingPlayerCommand = false,
+                        isMutatingPlayerQueue = false,
                         playerErrorMessage = null,
                         playerMixerErrorMessage = null,
                         playerPlaybackOptionsErrorMessage = null,
+                        playerQueueErrorMessage = null,
                         powerUpdatingPlayerId = null,
                         playerPowerErrorMessage = null,
                         errorMessage = null,
@@ -268,22 +286,31 @@ class ConnectionViewModel(
                 playerStatus = null,
                 playerMixerState = null,
                 playerPlaybackOptions = null,
+                playerQueue = emptyList(),
+                playerQueueOffset = 0,
+                playerQueueTotalCount = 0,
+                playerQueueCurrentIndex = null,
                 isLoadingPlayerStatus = true,
                 isLoadingMixerState = true,
                 isLoadingPlaybackOptions = true,
+                isLoadingPlayerQueue = true,
                 isSendingPlayerCommand = false,
+                isMutatingPlayerQueue = false,
                 playerErrorMessage = null,
                 playerMixerErrorMessage = null,
-                playerPlaybackOptionsErrorMessage = null
+                playerPlaybackOptionsErrorMessage = null,
+                playerQueueErrorMessage = null
             )
         }
         viewModelScope.launch {
             var status: LmsPlayerStatus? = null
             var mixerState: LmsPlayerMixerState? = null
             var playbackOptions: LmsPlayerPlaybackOptions? = null
+            var queuePage: LmsPlayerQueuePage? = null
             var statusFailed = false
             var mixerStateFailed = false
             var playbackOptionsFailed = false
+            var queueFailed = false
             try {
                 status = playerRemoteGateway.getPlayerStatus(connection, playerId)
             } catch (exception: CancellationException) {
@@ -304,6 +331,18 @@ class ConnectionViewModel(
                 throw exception
             } catch (_: Exception) {
                 playbackOptionsFailed = true
+            }
+            try {
+                queuePage = playerRemoteGateway.getPlayerQueue(
+                    connection,
+                    playerId,
+                    offset = status?.playlistIndex?.coerceAtLeast(0) ?: 0,
+                    limit = QUEUE_PAGE_SIZE
+                )
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                queueFailed = true
             }
             mutableUiState.update {
                 if (it.selectedPlayerId == playerId && it.activeConnection == connection) {
@@ -328,6 +367,16 @@ class ConnectionViewModel(
                             "Could not read this player's shuffle and repeat settings."
                         } else {
                             null
+                        },
+                        isLoadingPlayerQueue = false,
+                        playerQueue = queuePage?.items.orEmpty(),
+                        playerQueueOffset = queuePage?.offset ?: 0,
+                        playerQueueTotalCount = queuePage?.totalCount ?: 0,
+                        playerQueueCurrentIndex = queuePage?.currentIndex,
+                        playerQueueErrorMessage = if (queueFailed) {
+                            "Could not load this player's queue."
+                        } else {
+                            null
                         }
                     )
                 } else {
@@ -349,6 +398,10 @@ class ConnectionViewModel(
 
         try {
             val status = playerRemoteGateway.getPlayerStatus(connection, playerId)
+            val queueChanged = currentState.playerStatus?.let { previous ->
+                previous.playlistIndex != status.playlistIndex ||
+                    previous.trackId != status.trackId
+            } == true
             mutableUiState.update {
                 if (it.selectedPlayerId == playerId && it.activeConnection == connection) {
                     it.copy(playerStatus = status, playerErrorMessage = null)
@@ -356,6 +409,7 @@ class ConnectionViewModel(
                     it
                 }
             }
+            if (queueChanged) refreshPlayerQueue()
         } catch (exception: CancellationException) {
             throw exception
         } catch (_: Exception) {
@@ -364,6 +418,224 @@ class ConnectionViewModel(
                     it.copy(playerErrorMessage = "Could not read this player's status.")
                 } else {
                     it
+                }
+            }
+        }
+    }
+
+    suspend fun refreshPlayerQueue() {
+        val state = mutableUiState.value
+        val connection = state.activeConnection ?: return
+        val playerId = state.selectedPlayerId ?: return
+        if (state.isLoadingPlayerQueue || state.isMutatingPlayerQueue) return
+        val offset = state.playerStatus?.playlistIndex?.coerceAtLeast(0)
+            ?: state.playerQueueCurrentIndex?.coerceAtLeast(0)
+            ?: 0
+        loadPlayerQueuePage(connection, playerId, offset, append = false)
+    }
+
+    fun loadMorePlayerQueue() {
+        val state = mutableUiState.value
+        val connection = state.activeConnection ?: return
+        val playerId = state.selectedPlayerId ?: return
+        if (state.isLoadingPlayerQueue || state.isMutatingPlayerQueue) return
+        val offset = state.playerQueueOffset + state.playerQueue.size
+        if (offset >= state.playerQueueTotalCount) return
+        viewModelScope.launch {
+            loadPlayerQueuePage(connection, playerId, offset, append = true)
+        }
+    }
+
+    fun addPlayerQueueItem(item: LmsLibraryItem, position: LmsQueueAddPosition) {
+        if (item.isContainer) return
+        mutatePlayerQueue { connection, playerId ->
+            playerRemoteGateway.addQueueItem(connection, playerId, item, position)
+        }
+    }
+
+    fun removePlayerQueueItem(index: Int) {
+        val state = mutableUiState.value
+        val currentIndex = state.playerQueueCurrentIndex ?: state.playerStatus?.playlistIndex ?: -1
+        if (index <= currentIndex || state.playerQueue.none { it.index == index }) return
+        mutatePlayerQueue { connection, playerId ->
+            playerRemoteGateway.removeQueueItem(connection, playerId, index)
+        }
+    }
+
+    fun movePlayerQueueItem(fromIndex: Int, toIndex: Int) {
+        val state = mutableUiState.value
+        val currentIndex = state.playerQueueCurrentIndex ?: state.playerStatus?.playlistIndex ?: -1
+        if (fromIndex <= currentIndex || toIndex <= currentIndex) return
+        if (state.playerQueue.none { it.index == fromIndex } ||
+            state.playerQueue.none { it.index == toIndex }
+        ) return
+        mutatePlayerQueue { connection, playerId ->
+            playerRemoteGateway.moveQueueItem(connection, playerId, fromIndex, toIndex)
+        }
+    }
+
+    private suspend fun loadPlayerQueuePage(
+        connection: LmsServerConnection,
+        playerId: String,
+        offset: Int,
+        append: Boolean
+    ) {
+        mutableUiState.update {
+            if (it.activeConnection == connection && it.selectedPlayerId == playerId &&
+                !it.isMutatingPlayerQueue
+            ) {
+                it.copy(isLoadingPlayerQueue = true, playerQueueErrorMessage = null)
+            } else {
+                it
+            }
+        }
+        try {
+            var page = playerRemoteGateway.getPlayerQueue(
+                connection,
+                playerId,
+                offset,
+                QUEUE_PAGE_SIZE
+            )
+            if (page.offset != offset) {
+                throw LmsProtocolException("LMS returned a queue page with an unexpected offset.")
+            }
+            var effectiveAppend = append
+            if (append && page.totalCount < offset) {
+                page = playerRemoteGateway.getPlayerQueue(
+                    connection,
+                    playerId,
+                    offset = 0,
+                    limit = QUEUE_PAGE_SIZE
+                )
+                effectiveAppend = false
+            }
+            mutableUiState.update {
+                if (it.activeConnection == connection && it.selectedPlayerId == playerId) {
+                    if (effectiveAppend && it.playerQueue.size != offset) {
+                        it.copy(
+                            isLoadingPlayerQueue = false,
+                            playerQueueErrorMessage = "The queue changed while loading. Refresh it to continue."
+                        )
+                    } else {
+                        it.copy(
+                            isLoadingPlayerQueue = false,
+                            playerQueueOffset = if (effectiveAppend) it.playerQueueOffset else page.offset,
+                            playerQueue = if (effectiveAppend) it.playerQueue + page.items else page.items,
+                            playerQueueTotalCount = page.totalCount,
+                            playerQueueCurrentIndex = page.currentIndex,
+                            playerQueueErrorMessage = null
+                        )
+                    }
+                } else {
+                    it
+                }
+            }
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: Exception) {
+            mutableUiState.update {
+                if (it.activeConnection == connection && it.selectedPlayerId == playerId) {
+                    it.copy(
+                        isLoadingPlayerQueue = false,
+                        playerQueueErrorMessage = "Could not load this player's queue."
+                    )
+                } else {
+                    it
+                }
+            }
+        } finally {
+            mutableUiState.update {
+                if (it.activeConnection == connection && it.selectedPlayerId == playerId) {
+                    it.copy(isLoadingPlayerQueue = false)
+                } else {
+                    it
+                }
+            }
+        }
+    }
+
+    private fun mutatePlayerQueue(
+        mutation: suspend (LmsServerConnection, String) -> Unit
+    ) {
+        val state = mutableUiState.value
+        val connection = state.activeConnection
+        val playerId = state.selectedPlayerId
+        if (connection == null || playerId == null) {
+            mutableUiState.update {
+                it.copy(playerQueueErrorMessage = "Select a player before changing the queue.")
+            }
+            return
+        }
+        if (state.isMutatingPlayerQueue || state.isLoadingPlayerQueue) return
+        var started = false
+        mutableUiState.update {
+            if (it.activeConnection == connection && it.selectedPlayerId == playerId &&
+                !it.isMutatingPlayerQueue && !it.isLoadingPlayerQueue
+            ) {
+                started = true
+                it.copy(
+                    isMutatingPlayerQueue = true,
+                    isLoadingPlayerQueue = true,
+                    playerQueueErrorMessage = null
+                )
+            } else {
+                it
+            }
+        }
+        if (!started) return
+        val refreshOffset = state.playerStatus?.playlistIndex?.coerceAtLeast(0)
+            ?: state.playerQueueCurrentIndex?.coerceAtLeast(0)
+            ?: 0
+        viewModelScope.launch {
+            var mutationCompleted = false
+            try {
+                mutation(connection, playerId)
+                mutationCompleted = true
+                val page = playerRemoteGateway.getPlayerQueue(
+                    connection,
+                    playerId,
+                    offset = refreshOffset,
+                    limit = QUEUE_PAGE_SIZE
+                )
+                mutableUiState.update {
+                    if (it.activeConnection == connection && it.selectedPlayerId == playerId) {
+                        it.copy(
+                            playerQueueOffset = page.offset,
+                            playerQueue = page.items,
+                            playerQueueTotalCount = page.totalCount,
+                            playerQueueCurrentIndex = page.currentIndex,
+                            playerQueueErrorMessage = null
+                        )
+                    } else {
+                        it
+                    }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                mutableUiState.update {
+                    if (it.activeConnection == connection && it.selectedPlayerId == playerId) {
+                        it.copy(
+                            playerQueueErrorMessage = if (mutationCompleted) {
+                                "The queue changed, but could not be refreshed."
+                            } else {
+                                "Could not update this player's queue."
+                            }
+                        )
+                    } else {
+                        it
+                    }
+                }
+            } finally {
+                mutableUiState.update {
+                    if (it.activeConnection == connection && it.selectedPlayerId == playerId) {
+                        it.copy(
+                            isLoadingPlayerQueue = false,
+                            isMutatingPlayerQueue = false
+                        )
+                    } else {
+                        it
+                    }
                 }
             }
         }
@@ -378,6 +650,9 @@ class ConnectionViewModel(
             command is LmsPlayerCommand.SetMuted
         val updatesPlaybackOptions = command is LmsPlayerCommand.SetShuffleMode ||
             command is LmsPlayerCommand.SetRepeatMode
+        val updatesQueue = command !is LmsPlayerCommand.SetVolume &&
+            command !is LmsPlayerCommand.SetMuted &&
+            command !is LmsPlayerCommand.SetPower
 
         mutableUiState.update {
             it.copy(
@@ -418,6 +693,7 @@ class ConnectionViewModel(
                         it
                     }
                 }
+                if (updatesQueue) refreshPlayerQueue()
             } catch (exception: CancellationException) {
                 throw exception
             } catch (_: Exception) {
@@ -476,6 +752,13 @@ class ConnectionViewModel(
                             playerStatus = if (deselectPlayer) null else it.playerStatus,
                             playerMixerState = if (deselectPlayer) null else it.playerMixerState,
                             playerPlaybackOptions = if (deselectPlayer) null else it.playerPlaybackOptions,
+                            playerQueue = if (deselectPlayer) emptyList() else it.playerQueue,
+                            playerQueueOffset = if (deselectPlayer) 0 else it.playerQueueOffset,
+                            playerQueueTotalCount = if (deselectPlayer) 0 else it.playerQueueTotalCount,
+                            playerQueueCurrentIndex = if (deselectPlayer) null else it.playerQueueCurrentIndex,
+                            isLoadingPlayerQueue = if (deselectPlayer) false else it.isLoadingPlayerQueue,
+                            isMutatingPlayerQueue = if (deselectPlayer) false else it.isMutatingPlayerQueue,
+                            playerQueueErrorMessage = if (deselectPlayer) null else it.playerQueueErrorMessage,
                             playerPowerErrorMessage = null
                         )
                     } else {
@@ -512,6 +795,13 @@ class ConnectionViewModel(
                     activeConnection = null,
                     selectedPlayerId = null,
                     playerStatus = null,
+                    playerQueue = emptyList(),
+                    playerQueueOffset = 0,
+                    playerQueueTotalCount = 0,
+                    playerQueueCurrentIndex = null,
+                    isLoadingPlayerQueue = false,
+                    isMutatingPlayerQueue = false,
+                    playerQueueErrorMessage = null,
                     errorMessage = "Enter a valid port."
                 )
             }
@@ -535,6 +825,13 @@ class ConnectionViewModel(
                     activeConnection = null,
                     selectedPlayerId = null,
                     playerStatus = null,
+                    playerQueue = emptyList(),
+                    playerQueueOffset = 0,
+                    playerQueueTotalCount = 0,
+                    playerQueueCurrentIndex = null,
+                    isLoadingPlayerQueue = false,
+                    isMutatingPlayerQueue = false,
+                    playerQueueErrorMessage = null,
                     errorMessage = exception.message
                 )
             }
@@ -613,13 +910,20 @@ class ConnectionViewModel(
                 playerStatus = null,
                 playerMixerState = null,
                 playerPlaybackOptions = null,
+                playerQueue = emptyList(),
+                playerQueueOffset = 0,
+                playerQueueTotalCount = 0,
+                playerQueueCurrentIndex = null,
                 isLoadingPlayerStatus = false,
                 isLoadingMixerState = false,
                 isLoadingPlaybackOptions = false,
+                isLoadingPlayerQueue = false,
                 isSendingPlayerCommand = false,
+                isMutatingPlayerQueue = false,
                 playerErrorMessage = null,
                 playerMixerErrorMessage = null,
                 playerPlaybackOptionsErrorMessage = null,
+                playerQueueErrorMessage = null,
                 powerUpdatingPlayerId = null,
                 playerPowerErrorMessage = null,
                 errorMessage = null,
@@ -679,6 +983,19 @@ class ConnectionViewModel(
                 serverProfileId = null,
                 selectedPlayerId = null,
                 playerStatus = null,
+                playerMixerState = null,
+                playerPlaybackOptions = null,
+                playerQueue = emptyList(),
+                playerQueueOffset = 0,
+                playerQueueTotalCount = 0,
+                playerQueueCurrentIndex = null,
+                isLoadingPlayerStatus = false,
+                isLoadingMixerState = false,
+                isLoadingPlaybackOptions = false,
+                isLoadingPlayerQueue = false,
+                isSendingPlayerCommand = false,
+                isMutatingPlayerQueue = false,
+                playerQueueErrorMessage = null,
                 errorMessage = message
             )
         }
@@ -696,13 +1013,20 @@ class ConnectionViewModel(
                 playerStatus = null,
                 playerMixerState = null,
                 playerPlaybackOptions = null,
+                playerQueue = emptyList(),
+                playerQueueOffset = 0,
+                playerQueueTotalCount = 0,
+                playerQueueCurrentIndex = null,
                 isLoadingPlayerStatus = false,
                 isLoadingMixerState = false,
                 isLoadingPlaybackOptions = false,
+                isLoadingPlayerQueue = false,
                 isSendingPlayerCommand = false,
+                isMutatingPlayerQueue = false,
                 playerErrorMessage = null,
                 playerMixerErrorMessage = null,
                 playerPlaybackOptionsErrorMessage = null,
+                playerQueueErrorMessage = null,
                 powerUpdatingPlayerId = null,
                 playerPowerErrorMessage = null,
                 errorMessage = null,
@@ -710,6 +1034,10 @@ class ConnectionViewModel(
                 savedServerErrorMessage = null
             )
         }
+    }
+
+    private companion object {
+        const val QUEUE_PAGE_SIZE = 100
     }
 
     class Factory(

@@ -250,6 +250,67 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun metadataNavigationUsesUniqueExactArtistAndAlbumMatches() {
+        runLibraryViewModelTest {
+            val gateway = FakeLibraryGateway()
+            val store = LmsActivePlayerStore().apply { select(activePlayer()) }
+            val viewModel = LibraryViewModel(gateway, store)
+
+            gateway.page = LmsLibraryPage(
+                listOf(LmsLibraryItem("artist-1", LmsLibraryItemType.ARTIST, "Arlo Parks")),
+                0,
+                1
+            )
+            viewModel.openMetadataItem(LmsLibraryItemType.ARTIST, "Arlo Parks")
+            advanceUntilIdle()
+
+            assertEquals(LmsLibraryQuery.ARTISTS, gateway.requestedQuery)
+            assertEquals("Arlo Parks", gateway.requestedSearch)
+            assertEquals(LmsLibraryQuery.ALBUMS, viewModel.uiState.value.location.query)
+            assertEquals("artist-1", viewModel.uiState.value.location.filter.artistId)
+
+            gateway.page = LmsLibraryPage(
+                listOf(LmsLibraryItem("album-1", LmsLibraryItemType.ALBUM, "Collapsed in Sunbeams")),
+                0,
+                1
+            )
+            viewModel.openMetadataItem(LmsLibraryItemType.ALBUM, "Collapsed in Sunbeams")
+            advanceUntilIdle()
+
+            assertEquals(LmsLibraryQuery.ALBUMS, gateway.requestedQuery)
+            assertEquals(LmsLibraryQuery.TRACKS, viewModel.uiState.value.location.query)
+            assertEquals("album-1", viewModel.uiState.value.location.filter.albumId)
+        }
+    }
+
+    @Test
+    fun metadataNavigationFallsBackToGlobalSearchForMissingOrAmbiguousMatches() {
+        runLibraryViewModelTest {
+            val gateway = FakeLibraryGateway()
+            val store = LmsActivePlayerStore().apply { select(activePlayer()) }
+            val viewModel = LibraryViewModel(gateway, store)
+            gateway.page = LmsLibraryPage(emptyList(), 0, 0)
+
+            viewModel.openMetadataItem(LmsLibraryItemType.ARTIST, "Unknown Artist")
+            advanceUntilIdle()
+
+            assertEquals("Unknown Artist", viewModel.uiState.value.searchText)
+            assertTrue(viewModel.uiState.value.isAtRoot)
+
+            gateway.page = LmsLibraryPage(
+                listOf(LmsLibraryItem("album-1", LmsLibraryItemType.ALBUM, "Blue")),
+                0,
+                2
+            )
+            viewModel.openMetadataItem(LmsLibraryItemType.ALBUM, "Blue")
+            advanceUntilIdle()
+
+            assertEquals("Blue", viewModel.uiState.value.searchText)
+            assertTrue(viewModel.uiState.value.isAtRoot)
+        }
+    }
+
+    @Test
     fun itemsFlowReturnsForNoPlayerBrowseAndSearchRequests() {
         runLibraryViewModelTest {
             val noPlayerViewModel = LibraryViewModel(FakeLibraryGateway(), LmsActivePlayerStore())
@@ -519,6 +580,8 @@ class LibraryViewModelTest {
         var playedPlayerId: String? = null
         var artistArtworkUrl: String? = null
         var artistArtworkRequestCount = 0
+        var requestedQuery: LmsLibraryQuery? = null
+        var requestedSearch: String? = null
         var pageError: Exception? = null
         var playNowError: Exception? = null
 
@@ -531,6 +594,8 @@ class LibraryViewModelTest {
             search: String?
         ): LmsLibraryPage {
             pageError?.let { throw it }
+            requestedQuery = query
+            requestedSearch = search
             requestedOffset = offset
             requestedLimit = limit
             return page.copy(offset = offset)

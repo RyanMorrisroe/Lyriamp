@@ -349,6 +349,66 @@ class LibraryViewModel(
         }
     }
 
+    fun openMetadataItem(type: LmsLibraryItemType, title: String) {
+        val query = when (type) {
+            LmsLibraryItemType.ARTIST -> LmsLibraryQuery.ARTISTS
+            LmsLibraryItemType.ALBUM -> LmsLibraryQuery.ALBUMS
+            else -> throw IllegalArgumentException("Only artist and album metadata can be browsed.")
+        }
+        val normalizedTitle = title.trim()
+        rememberCurrentTab()
+        mutableLocationStack.value = listOf(LibraryLocation("Library"))
+        mutableSearchText.value = ""
+        mutableRestoredScrollAnchor.value = null
+        mutableSelectedTab.value = LibraryTab.HOME
+        mutableMessage.value = null
+        if (normalizedTitle.isBlank()) return
+        val player = activePlayerStore.activePlayer.value
+        if (player == null) {
+            setSearchText(normalizedTitle)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val page = libraryGateway.getPage(
+                    connection = player.connection,
+                    query = query,
+                    offset = 0,
+                    limit = METADATA_MATCH_LIMIT,
+                    search = normalizedTitle
+                )
+                val exactMatches = page.items.filter {
+                    it.type == type && it.title.trim().equals(normalizedTitle, ignoreCase = true)
+                }
+                if (page.totalCount <= page.items.size && exactMatches.size == 1) {
+                    val tab = if (type == LmsLibraryItemType.ARTIST) {
+                        LibraryTab.ARTISTS
+                    } else {
+                        LibraryTab.ALBUMS
+                    }
+                    val tabLocations = listOf(
+                        LibraryLocation("Library"),
+                        LibraryLocation(tab.title, tab.query)
+                    )
+                    mutableTabs.update {
+                        it + (tab to LibraryTabState(tabLocations))
+                    }
+                    mutableLocationStack.value = tabLocations
+                    mutableSelectedTab.value = tab
+                    mutableLastVisitedTab.value = tab
+                    openItem(exactMatches.single())
+                } else {
+                    setSearchText(normalizedTitle)
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                setSearchText(normalizedTitle)
+                mutableMessage.value = "Could not verify the library match. Showing search results."
+            }
+        }
+    }
+
     fun navigateToBreadcrumb(index: Int) {
         if (index == 0) {
             selectTab(LibraryTab.HOME)
@@ -451,6 +511,7 @@ class LibraryViewModel(
 
     private companion object {
         const val PAGE_SIZE = 30
+        const val METADATA_MATCH_LIMIT = 100
         const val MAX_CACHED_ARTIST_ARTWORK = 256
         const val SEARCH_DEBOUNCE_MILLIS = 300L
         val pagingConfig = PagingConfig(

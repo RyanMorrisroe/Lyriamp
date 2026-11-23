@@ -4,7 +4,7 @@
 
 ## Project Status
 
-Lyriamp is a native Android remote for Lyrion Music Server (LMS). It supports manual server connections, saved profiles, full-screen Connections/Server Setup/Player Selection/Library/Now Playing screens, last-session restoration, category-based library browsing, global artist/album/track search, bounded infinite scrolling, artwork, play-now, playback/mixer controls, and a Media3 remote session. It does not implement queue editing, LMS sync groups, saved player sets, or server discovery. Keep documentation and change summaries aligned with the implementation.
+Lyriamp is a native Android remote for Lyrion Music Server (LMS). It supports manual server connections, saved profiles, full-screen Connections/Server Setup/Player Selection/Library/Now Playing/Queue screens, last-session restoration, category-based library browsing, global artist/album/track search, bounded infinite scrolling, artwork, play-now, upcoming queue management, playback/mixer controls, and a Media3 remote session. Queue edits must keep the active track fixed; users can add, reorder, and remove upcoming items. It does not implement LMS sync groups, saved player sets, saved queues, or server discovery. Keep documentation and change summaries aligned with the implementation.
 
 Audio is rendered by LMS players; Lyriamp sends remote commands and does not play audio locally.
 
@@ -14,6 +14,7 @@ Audio is rendered by LMS players; Lyriamp sends remote commands and does not pla
 - `app/src/main/java/.../data/persistence/` contains saved-server persistence and the Android Keystore credential cipher.
 - `app/src/main/java/.../feature/connection/` contains the Compose connection/controller screen and its ViewModel.
 - `app/src/main/java/.../feature/library/` contains the paged library/search state, browse navigation, and connected library/player Compose screen.
+- `app/src/main/java/.../feature/player/` contains the artwork-first Now Playing screen and queue preview/full-queue management.
 - `app/src/main/java/.../AppNavigation.kt` coordinates full-screen destinations and last-session restoration through `LastSessionRepository`.
 - `app/src/main/java/.../media/` adapts the selected LMS player to a Media3 `MediaSession`.
 - Keep network and persistence behavior behind the existing gateway/repository interfaces. Prefer focused Kotlin/JVM tests for deterministic behavior; use Ktor `MockEngine` for HTTP protocol tests.

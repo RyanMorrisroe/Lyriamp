@@ -604,7 +604,7 @@ class LmsJsonRpcClientTest {
             capturedRequest = request
             respondJson(
                 """
-                {"id":1,"result":{"mode":"play","time":"32.5","can_seek":1,
+                {"id":1,"result":{"mode":"play","time":"32.5","can_seek":1,"playlist_cur_index":0,
                   "playlist_loop":[{"title":"Track","artist":"Artist","album":"Album","duration":"210",
                     "coverid":27,"artwork_url":"../imageproxy/cover.jpg"}]}}
                 """.trimIndent()
@@ -625,6 +625,7 @@ class LmsJsonRpcClientTest {
             assertEquals("../imageproxy/cover.jpg", status.artworkUrl)
             assertEquals(32.5, status.positionSeconds, 0.0)
             assertEquals(210.0, status.durationSeconds!!, 0.0)
+            assertEquals(0, status.playlistIndex)
             assertTrue(status.canSeek)
             val requestJson = Json.parseToJsonElement(
                 (capturedRequest?.body as TextContent).text
@@ -638,9 +639,123 @@ class LmsJsonRpcClientTest {
                 requestJson["params"]?.jsonArray?.get(1)?.jsonArray?.get(0)?.jsonPrimitive?.content
             )
             assertEquals(
-                listOf("status", "-", "1", "tags:cgABKJ"),
+                listOf("status", "-", "1", "tags:aclKN"),
                 capturedCommand(capturedRequest)
             )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun readsQueuePagesWithAbsoluteIndexesAndMetadata() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """
+                {"id":1,"result":{"playlist_cur_index":1,"playlist_tracks":5,
+                  "playlist_loop":[
+                    {"playlist index":3,"id":"track-3","title":"Next track","artist":"Artist",
+                      "album":"Album","duration":"180","coverid":"cover-3"}
+                  ]}}
+                """.trimIndent()
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPlayerQueue(
+                LmsServerConnection("lms.local"),
+                "player-1",
+                offset = 3,
+                limit = 2
+            )
+
+            assertEquals(3, page.offset)
+            assertEquals(5, page.totalCount)
+            assertEquals(1, page.currentIndex)
+            assertEquals(
+                listOf(LmsQueueItem(3, "track-3", "Next track", "Artist", "Album", 180.0, "cover-3", null)),
+                page.items
+            )
+            assertEquals(listOf("status", "3", "2", "tags:aclKN"), capturedCommand(capturedRequest))
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun sendsQueueAddRemoveAndMoveCommands() = runBlocking {
+        val commands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            commands += capturedCommand(request)
+            respondJson("{\"id\":1,\"result\":{}}")
+        })
+
+        try {
+            val gateway = LmsJsonRpcClient(client)
+            val connection = LmsServerConnection("lms.local")
+            gateway.addQueueItem(
+                connection,
+                "player-1",
+                LmsLibraryItem("track-1", LmsLibraryItemType.TRACK, "Track"),
+                LmsQueueAddPosition.END
+            )
+            gateway.addQueueItem(
+                connection,
+                "player-1",
+                LmsLibraryItem("album-1", LmsLibraryItemType.ALBUM, "Album"),
+                LmsQueueAddPosition.NEXT
+            )
+            gateway.addQueueItem(
+                connection,
+                "player-1",
+                LmsLibraryItem("artist-1", LmsLibraryItemType.ARTIST, "Artist"),
+                LmsQueueAddPosition.END
+            )
+            gateway.addQueueItem(
+                connection,
+                "player-1",
+                LmsLibraryItem("genre-1", LmsLibraryItemType.GENRE, "Genre"),
+                LmsQueueAddPosition.NEXT
+            )
+            gateway.addQueueItem(
+                connection,
+                "player-1",
+                LmsLibraryItem("playlist-1", LmsLibraryItemType.PLAYLIST, "Playlist"),
+                LmsQueueAddPosition.END
+            )
+            gateway.removeQueueItem(connection, "player-1", 4)
+            gateway.moveQueueItem(connection, "player-1", fromIndex = 5, toIndex = 2)
+
+            assertEquals(
+                listOf(
+                    listOf("playlistcontrol", "cmd:add", "track_id:track-1"),
+                    listOf("playlistcontrol", "cmd:insert", "album_id:album-1"),
+                    listOf("playlistcontrol", "cmd:add", "artist_id:artist-1", "sort:album"),
+                    listOf("playlistcontrol", "cmd:insert", "genre_id:genre-1", "sort:album"),
+                    listOf("playlistcontrol", "cmd:add", "playlist_id:playlist-1"),
+                    listOf("playlist", "delete", "4"),
+                    listOf("playlist", "move", "5", "2")
+                ),
+                commands
+            )
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    gateway.addQueueItem(
+                        connection,
+                        "player-1",
+                        LmsLibraryItem(
+                            "folder-1",
+                            LmsLibraryItemType.PLAYLIST,
+                            "Playlist folder",
+                            isContainer = true
+                        ),
+                        LmsQueueAddPosition.END
+                    )
+                }
+            }
+            Unit
         } finally {
             client.close()
         }
