@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lyriamp — album track listing concepts</title>
+  <style>
+    :root {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: #20243a;
+      background: #eef1f7;
+      --blue: #4f67a7;
+      --blue-dark: #40558f;
+      --blue-pale: #edf2ff;
+      --ink: #20243a;
+      --muted: #70779a;
+      --line: #dde2ed;
+      --surface: #fbfcff;
+      --soft: #f4f6fb;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+
+    .page {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 42px 28px 72px;
+    }
+
+    .eyebrow {
+      color: #6577aa;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 8px 0 8px;
+      font-size: clamp(32px, 4vw, 48px);
+      letter-spacing: -.045em;
+    }
+
+    .intro {
+      max-width: 760px;
+      margin: 0;
+      color: #68708a;
+      line-height: 1.55;
+    }
+
+    .note {
+      display: inline-flex;
+      margin: 16px 0 28px;
+      padding: 9px 12px;
+      border: 1px solid #d7ddea;
+      border-radius: 999px;
+      background: #f8faff;
+      color: #68708a;
+      font-size: 12px;
+    }
+
+    .concepts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(300px, 1fr));
+      gap: 28px;
+      align-items: start;
+    }
+
+    .concept { min-width: 0; }
+
+    .concept-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 9px;
+      margin-bottom: 7px;
+    }
+
+    .concept-heading span {
+      color: #7183b5;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .concept-heading h2 {
+      margin: 0;
+      font-size: 19px;
+      letter-spacing: -.03em;
+    }
+
+    .description {
+      min-height: 58px;
+      margin: 0 0 14px;
+      color: #737a91;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .phone {
+      position: relative;
+      width: 100%;
+      max-width: 390px;
+      height: 820px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid #b7bfd0;
+      border-radius: 34px;
+      background: #fbfbfd;
+      box-shadow: 0 18px 44px rgba(60, 69, 94, .18), inset 0 0 0 4px #f0f2f7;
+    }
+
+    .status {
+      height: 38px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      padding: 0 21px 5px;
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .status-icons {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      letter-spacing: 1px;
+    }
+
+    .status-signal {
+      width: 18px;
+      height: 10px;
+      border-radius: 2px;
+      background:
+        linear-gradient(90deg,
+          #20243a 0 10%, transparent 10% 21%,
+          #20243a 21% 31%, transparent 31% 42%,
+          #20243a 42% 52%, transparent 52% 63%,
+          #20243a 63% 73%, transparent 73% 84%,
+          #20243a 84%);
+    }
+
+    .screen {
+      height: 782px;
+      overflow: hidden;
+    }
+
+    .top {
+      height: 55px;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 0 13px;
+    }
+
+    .back {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      color: var(--blue);
+      font-size: 29px;
+      line-height: 1;
+    }
+
+    .top-avatar {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      border-radius: 50%;
+      background: #edf0f7;
+      color: #606a86;
+      font-size: 10px;
+    }
+
+    .search-icon,
+    .more-icon {
+      display: grid;
+      height: 34px;
+      place-items: center;
+      color: #292d43;
+      font-size: 21px;
+    }
+
+    .search-icon { margin-left: auto; }
+
+    .tabs {
+      height: 42px;
+      display: flex;
+      align-items: end;
+      gap: 0;
+      padding: 0 12px;
+      border-bottom: 1px solid #edf0f5;
+    }
+
+    .tab {
+      height: 42px;
+      display: grid;
+      flex: 1;
+      place-items: center;
+      border-bottom: 2px solid transparent;
+      color: #4d5e91;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .tab.active {
+      border-bottom-color: #4f67a7;
+      color: #3f568f;
+      font-weight: 750;
+    }
+
+    .breadcrumb {
+      height: 38px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 13px;
+      color: #5d6691;
+      font-size: 12px;
+    }
+
+    .breadcrumb span { color: #969cb2; }
+
+    .album-bar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 13px 4px;
+    }
+
+    .album-title {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+    }
+
+    .album-title strong {
+      font-size: 15px;
+      letter-spacing: -.02em;
+    }
+
+    .album-title small {
+      color: #7d839c;
+      font-size: 11px;
+    }
+
+    .layout-toggle {
+      display: flex;
+      align-items: center;
+      height: 38px;
+      overflow: hidden;
+      border: 1px solid #d9dfeb;
+      border-radius: 11px;
+      background: #fff;
+    }
+
+    .layout-toggle span {
+      display: grid;
+      width: 35px;
+      height: 36px;
+      place-items: center;
+      color: #777e99;
+      font-size: 17px;
+    }
+
+    .layout-toggle .selected {
+      background: #edf1fa;
+      color: #3f568f;
+    }
+
+    .track-scroll {
+      height: 565px;
+      overflow: hidden;
+    }
+
+    .disc-heading {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 2px 13px 0;
+      padding: 0 10px;
+      border: 1px solid #e3e7f1;
+      border-radius: 9px;
+      background: #f6f8fc;
+      color: #596484;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+
+    .disc-heading small {
+      color: #9aa0b3;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .04em;
+    }
+
+    .track-row {
+      height: 58px;
+      display: flex;
+      align-items: center;
+      margin: 0 13px;
+      border-bottom: 1px solid #edf0f5;
+    }
+
+    .track-number {
+      flex: 0 0 42px;
+      color: #7d86a3;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+    }
+
+    .track-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .track-copy strong,
+    .track-copy small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .track-copy strong {
+      color: #31354d;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .track-copy small {
+      margin-top: 5px;
+      color: #8b91a8;
+      font-size: 10px;
+    }
+
+    .track-duration {
+      flex: 0 0 48px;
+      color: #7d839b;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .track-play {
+      flex: 0 0 34px;
+      color: #4d66a6;
+      font-size: 17px;
+      text-align: right;
+    }
+
+    .option-two .track-number {
+      width: 32px;
+      flex-basis: 32px;
+      height: 32px;
+      display: grid;
+      margin-right: 10px;
+      place-items: center;
+      border-radius: 50%;
+      background: #f1f3f8;
+      color: #687397;
+    }
+
+    .option-two .disc-heading {
+      border: 0;
+      border-radius: 8px 8px 0 0;
+      background: #edf1f8;
+      color: #526187;
+    }
+
+    .option-two .track-row {
+      height: 56px;
+      margin: 0 13px;
+      padding: 0 7px 0 2px;
+    }
+
+    .disc-control {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 0 13px 7px;
+      padding: 4px;
+      border: 1px solid #dde3ef;
+      border-radius: 11px;
+      background: #f7f8fb;
+    }
+
+    .disc-control button {
+      height: 32px;
+      flex: 1;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #78809a;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .disc-control button.active {
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(75, 85, 112, .12);
+      color: #40558f;
+    }
+
+    .option-three .track-scroll {
+      height: 510px;
+    }
+
+    .option-three .track-row {
+      height: 58px;
+    }
+
+    .option-three .track-number {
+      flex-basis: 38px;
+    }
+
+    .single-disc-callout {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      margin: 0 13px 8px;
+      padding: 0 12px;
+      border: 1px solid #e5e8f1;
+      border-radius: 9px;
+      background: #fafbfe;
+      color: #858ba0;
+      font-size: 10px;
+    }
+
+    .single-disc-callout strong {
+      margin-right: 5px;
+      color: #566177;
+    }
+
+    .mini-player {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      left: 10px;
+      height: 88px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 10px;
+      border: 1px solid #ccd1dd;
+      border-radius: 18px 18px 25px 25px;
+      background: rgba(248, 249, 252, .98);
+      box-shadow: 0 -6px 16px rgba(82, 90, 112, .09);
+    }
+
+    .mini-cover {
+      flex: 0 0 48px;
+      height: 48px;
+      overflow: hidden;
+      border-radius: 7px;
+      background:
+        linear-gradient(135deg, #d8c0a7 0 25%, #aebdb2 26% 48%, #6d7f77 49% 66%, #d5d9d4 67%);
+    }
+
+    .mini-meta {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .mini-meta strong,
+    .mini-meta small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mini-meta strong {
+      font-size: 12px;
+    }
+
+    .mini-meta small {
+      margin-top: 4px;
+      color: #70779a;
+      font-size: 10px;
+    }
+
+    .progress {
+      height: 5px;
+      margin-top: 7px;
+      overflow: hidden;
+      border-radius: 99px;
+      background: #9fb0d7;
+    }
+
+    .progress span {
+      display: block;
+      width: 55%;
+      height: 100%;
+      border-radius: inherit;
+      background: #4d66a6;
+    }
+
+    .mini-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #6d7591;
+      font-size: 15px;
+      white-space: nowrap;
+    }
+
+    .mini-play {
+      display: grid;
+      width: 43px;
+      height: 43px;
+      place-items: center;
+      border-radius: 50%;
+      background: #eef2fa;
+      color: #4d66a6;
+      font-size: 17px;
+    }
+
+    .recommendation {
+      max-width: 390px;
+      margin: 14px auto 0;
+      padding: 12px 13px;
+      border-left: 3px solid #647ab1;
+      border-radius: 4px 9px 9px 4px;
+      background: #f7f8fc;
+      color: #747b91;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .recommendation strong {
+      color: #40558f;
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 36px;
+      padding-top: 24px;
+      border-top: 1px solid #d9deea;
+    }
+
+    .comparison-card {
+      min-height: 118px;
+      padding: 16px;
+      border: 1px solid #dce1ec;
+      border-radius: 14px;
+      background: #f9faff;
+    }
+
+    .comparison-card h3 {
+      margin: 0 0 7px;
+      font-size: 14px;
+    }
+
+    .comparison-card p {
+      margin: 0;
+      color: #747b91;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .single-example {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      color: #58627c;
+      font-size: 11px;
+    }
+
+    .single-example span {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #edf1f8;
+      color: #687397;
+      font-variant-numeric: tabular-nums;
+    }
+
+    @media (max-width: 1120px) {
+      .concepts { grid-template-columns: repeat(2, minmax(300px, 1fr)); }
+      .concept:last-child { grid-column: 1 / -1; }
+      .concept:last-child .phone,
+      .concept:last-child .recommendation { margin-right: auto; margin-left: auto; }
+      .comparison { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      .page { padding: 28px 16px 52px; }
+      .concepts { grid-template-columns: 1fr; gap: 34px; }
+      .concept:last-child { grid-column: auto; }
+      .description { min-height: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="eyebrow">Lyriamp · album track listing</div>
+    <h1>Track numbers and discs.</h1>
+    <p class="intro">Three ways to add track numbers and multi-disc structure without making the existing album view feel heavier. In every option, a single-disc album stays free of disc headers or controls.</p>
+    <div class="note">Quick visual mock · illustrative sorting and metadata · controls are not functional</div>
+
+    <div class="concepts">
+      <section class="concept">
+        <div class="concept-heading"><span>01</span><h2>Inline numbered rows</h2></div>
+        <p class="description">The quietest option: track numbers sit in a stable left rail, with disc headings only where a release has more than one disc.</p>
+        <div class="phone option-one">
+          <div class="status"><span>12:45</span><span class="status-icons"><span class="status-signal"></span><span>◕</span><span>●</span></span></div>
+          <div class="screen">
+            <div class="top">
+              <div class="back">‹</div><div class="top-avatar">♫</div>
+              <div class="search-icon">⌕</div><div class="more-icon">⋮</div>
+            </div>
+            <div class="tabs">
+              <div class="tab">Home</div><div class="tab">Artists</div><div class="tab active">Albums</div><div class="tab">Genres</div><div class="tab">Songs</div>
+            </div>
+            <div class="breadcrumb">Library <span>/</span> Albums <span>/</span> 0</div>
+            <div class="album-bar">
+              <div class="album-title"><strong>Blue Ways</strong><small>2 discs</small></div>
+              <div class="layout-toggle"><span class="selected">☷</span><span>☰</span></div>
+            </div>
+            <div class="track-scroll">
+              <div class="disc-heading"><span>Disc 1</span><small>4 tracks</small></div>
+              <div class="track-row">
+                <div class="track-number">1</div><div class="track-copy"><strong>Blue Morning</strong><small>Nora Vale · 3:18</small></div><div class="track-duration">3:18</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">2</div><div class="track-copy"><strong>Open Water</strong><small>Nora Vale · 4:26</small></div><div class="track-duration">4:26</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">3</div><div class="track-copy"><strong>Harbor Lights</strong><small>Nora Vale · 3:52</small></div><div class="track-duration">3:52</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">4</div><div class="track-copy"><strong>Saltwater</strong><small>Nora Vale · 5:08</small></div><div class="track-duration">5:08</div><div class="track-play">▶</div>
+              </div>
+              <div class="disc-heading"><span>Disc 2</span><small>3 tracks</small></div>
+              <div class="track-row">
+                <div class="track-number">1</div><div class="track-copy"><strong>After the Tide</strong><small>Nora Vale · 4:11</small></div><div class="track-duration">4:11</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">2</div><div class="track-copy"><strong>Low Horizon</strong><small>Nora Vale · 3:44</small></div><div class="track-duration">3:44</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">3</div><div class="track-copy"><strong>Blue Evening</strong><small>Nora Vale · 5:22</small></div><div class="track-duration">5:22</div><div class="track-play">▶</div>
+              </div>
+            </div>
+          </div>
+          <div class="mini-player">
+            <div class="mini-cover"></div>
+            <div class="mini-meta"><strong>Open Water</strong><small>Nora Vale · Blue Ways</small><div class="progress"><span></span></div></div>
+            <div class="mini-controls"><span>◀</span><div class="mini-play">▶</div><span>▶▶</span></div>
+          </div>
+        </div>
+        <div class="recommendation"><strong>Recommended.</strong> Clear sorting, least visual noise, and the easiest treatment to keep consistent with a general track page.</div>
+      </section>
+
+      <section class="concept option-two">
+        <div class="concept-heading"><span>02</span><h2>Disc bands</h2></div>
+        <p class="description">Disc groups become fuller, more tactile bands. Track numbers use small circles and the group boundaries help long track lists scan quickly.</p>
+        <div class="phone">
+          <div class="status"><span>12:45</span><span class="status-icons"><span class="status-signal"></span><span>◕</span><span>●</span></span></div>
+          <div class="screen">
+            <div class="top">
+              <div class="back">‹</div><div class="top-avatar">♫</div>
+              <div class="search-icon">⌕</div><div class="more-icon">⋮</div>
+            </div>
+            <div class="tabs">
+              <div class="tab">Home</div><div class="tab">Artists</div><div class="tab active">Albums</div><div class="tab">Genres</div><div class="tab">Songs</div>
+            </div>
+            <div class="breadcrumb">Library <span>/</span> Albums <span>/</span> 0</div>
+            <div class="album-bar">
+              <div class="album-title"><strong>Blue Ways</strong><small>2 discs</small></div>
+              <div class="layout-toggle"><span class="selected">☷</span><span>☰</span></div>
+            </div>
+            <div class="track-scroll">
+              <div class="disc-heading"><span>Disc 1</span><small>Tracks 1–4</small></div>
+              <div class="track-row">
+                <div class="track-number">1</div><div class="track-copy"><strong>Blue Morning</strong><small>Nora Vale · 3:18</small></div><div class="track-duration">3:18</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">2</div><div class="track-copy"><strong>Open Water</strong><small>Nora Vale · 4:26</small></div><div class="track-duration">4:26</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">3</div><div class="track-copy"><strong>Harbor Lights</strong><small>Nora Vale · 3:52</small></div><div class="track-duration">3:52</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">4</div><div class="track-copy"><strong>Saltwater</strong><small>Nora Vale · 5:08</small></div><div class="track-duration">5:08</div><div class="track-play">▶</div>
+              </div>
+              <div class="disc-heading" style="margin-top:8px"><span>Disc 2</span><small>Tracks 1–3</small></div>
+              <div class="track-row">
+                <div class="track-number">1</div><div class="track-copy"><strong>After the Tide</strong><small>Nora Vale · 4:11</small></div><div class="track-duration">4:11</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">2</div><div class="track-copy"><strong>Low Horizon</strong><small>Nora Vale · 3:44</small></div><div class="track-duration">3:44</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">3</div><div class="track-copy"><strong>Blue Evening</strong><small>Nora Vale · 5:22</small></div><div class="track-duration">5:22</div><div class="track-play">▶</div>
+              </div>
+            </div>
+          </div>
+          <div class="mini-player">
+            <div class="mini-cover"></div>
+            <div class="mini-meta"><strong>Open Water</strong><small>Nora Vale · Blue Ways</small><div class="progress"><span></span></div></div>
+            <div class="mini-controls"><span>◀</span><div class="mini-play">▶</div><span>▶▶</span></div>
+          </div>
+        </div>
+        <div class="recommendation"><strong>More expressive.</strong> Stronger grouping and a friendlier visual hierarchy, but slightly more vertical height for the same track count.</div>
+      </section>
+
+      <section class="concept option-three">
+        <div class="concept-heading"><span>03</span><h2>Disc selector</h2></div>
+        <p class="description">One disc at a time in a segmented control. It is most useful for very long box sets, but hides the complete album at once.</p>
+        <div class="phone">
+          <div class="status"><span>12:45</span><span class="status-icons"><span class="status-signal"></span><span>◕</span><span>●</span></span></div>
+          <div class="screen">
+            <div class="top">
+              <div class="back">‹</div><div class="top-avatar">♫</div>
+              <div class="search-icon">⌕</div><div class="more-icon">⋮</div>
+            </div>
+            <div class="tabs">
+              <div class="tab">Home</div><div class="tab">Artists</div><div class="tab active">Albums</div><div class="tab">Genres</div><div class="tab">Songs</div>
+            </div>
+            <div class="breadcrumb">Library <span>/</span> Albums <span>/</span> 0</div>
+            <div class="album-bar">
+              <div class="album-title"><strong>Blue Ways</strong><small>2 discs</small></div>
+              <div class="layout-toggle"><span class="selected">☷</span><span>☰</span></div>
+            </div>
+            <div class="disc-control" role="tablist" aria-label="Album disc">
+              <button class="active" type="button" data-disc="1">Disc 1 · 4</button>
+              <button type="button" data-disc="2">Disc 2 · 3</button>
+            </div>
+            <div class="track-scroll" id="disc1">
+              <div class="track-row">
+                <div class="track-number">1</div><div class="track-copy"><strong>Blue Morning</strong><small>Nora Vale · 3:18</small></div><div class="track-duration">3:18</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">2</div><div class="track-copy"><strong>Open Water</strong><small>Nora Vale · 4:26</small></div><div class="track-duration">4:26</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">3</div><div class="track-copy"><strong>Harbor Lights</strong><small>Nora Vale · 3:52</small></div><div class="track-duration">3:52</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">4</div><div class="track-copy"><strong>Saltwater</strong><small>Nora Vale · 5:08</small></div><div class="track-duration">5:08</div><div class="track-play">▶</div>
+              </div>
+            </div>
+            <div class="track-scroll" id="disc2" style="display:none">
+              <div class="track-row">
+                <div class="track-number">1</div><div class="track-copy"><strong>After the Tide</strong><small>Nora Vale · 4:11</small></div><div class="track-duration">4:11</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">2</div><div class="track-copy"><strong>Low Horizon</strong><small>Nora Vale · 3:44</small></div><div class="track-duration">3:44</div><div class="track-play">▶</div>
+              </div>
+              <div class="track-row">
+                <div class="track-number">3</div><div class="track-copy"><strong>Blue Evening</strong><small>Nora Vale · 5:22</small></div><div class="track-duration">5:22</div><div class="track-play">▶</div>
+              </div>
+            </div>
+          </div>
+          <div class="mini-player">
+            <div class="mini-cover"></div>
+            <div class="mini-meta"><strong>Open Water</strong><small>Nora Vale · Blue Ways</small><div class="progress"><span></span></div></div>
+            <div class="mini-controls"><span>◀</span><div class="mini-play">▶</div><span>▶▶</span></div>
+          </div>
+        </div>
+        <div class="recommendation"><strong>Best for 3+ discs.</strong> Maximizes row count and can reduce scrolling, though it is less useful for normal two-disc albums.</div>
+      </section>
+    </div>
+
+    <div class="comparison">
+      <div class="comparison-card">
+        <h3>Single-disc behavior</h3>
+        <p>No “Disc 1” label and no disc selector. Option 1 and 2 show only the numbered track rows.</p>
+        <div class="single-example"><span>1</span> Blue Morning <span style="margin-left:auto">▶</span></div>
+      </div>
+      <div class="comparison-card">
+        <h3>Sorting rule</h3>
+        <p>Disc ascending first, then track ascending. Disc 1 track 1 through 4, followed by Disc 2 track 1 through 3.</p>
+      </div>
+      <div class="comparison-card">
+        <h3>Metadata fallback</h3>
+        <p>If a track number or disc number is missing, show the title and duration normally. Never infer a disc when the album contains only one disc.</p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    document.querySelectorAll('.disc-control button').forEach((button) => {
+      button.addEventListener('click', () => {
+        const phone = button.closest('.phone');
+        phone.querySelectorAll('.disc-control button').forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+        phone.querySelector('#disc1').style.display = button.dataset.disc === '1' ? 'block' : 'none';
+        phone.querySelector('#disc2').style.display = button.dataset.disc === '2' ? 'block' : 'none';
+      });
+    });
+  </script>
+</body>
+</html>

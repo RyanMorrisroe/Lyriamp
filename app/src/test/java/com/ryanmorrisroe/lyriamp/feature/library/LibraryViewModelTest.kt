@@ -355,6 +355,86 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun albumTrackPagingSortsByDiscThenTrack() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            page = LmsLibraryPage(
+                items = listOf(
+                    LmsLibraryItem(
+                        "22", LmsLibraryItemType.TRACK, "Disc 2 Track 2",
+                        discNumber = 2, trackNumber = 2
+                    ),
+                    LmsLibraryItem(
+                        "12", LmsLibraryItemType.TRACK, "Disc 1 Track 2",
+                        discNumber = 1, trackNumber = 2
+                    ),
+                    LmsLibraryItem(
+                        "21", LmsLibraryItemType.TRACK, "Disc 2 Track 1",
+                        discNumber = 2, trackNumber = 1
+                    ),
+                    LmsLibraryItem(
+                        "11", LmsLibraryItemType.TRACK, "Disc 1 Track 1",
+                        discNumber = 1, trackNumber = 1
+                    )
+                ),
+                offset = 0,
+                totalCount = 4
+            )
+        }
+        val source = LmsAlbumTracksPagingSource(
+            gateway,
+            activePlayer(),
+            LmsLibraryFilter(albumId = "42")
+        )
+
+        val result = source.load(PagingSource.LoadParams.Refresh(null, 30, false))
+
+        assertTrue(result is PagingSource.LoadResult.Page)
+        val page = result as PagingSource.LoadResult.Page
+        assertEquals(listOf("11", "12", "21", "22"), page.data.map { it.id })
+        assertEquals(0, page.itemsBefore)
+        assertEquals(0, page.itemsAfter)
+        assertEquals(100, gateway.requestedLimit)
+    }
+
+    @Test
+    fun albumTrackPagingFallsBackWithoutDiscOrTrackMetadata() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            page = LmsLibraryPage(
+                items = listOf(
+                    LmsLibraryItem("unknown", LmsLibraryItemType.TRACK, "Unknown"),
+                    LmsLibraryItem(
+                        "12",
+                        LmsLibraryItemType.TRACK,
+                        "Disc 1 Track 2",
+                        discNumber = 1,
+                        trackNumber = 2
+                    ),
+                    LmsLibraryItem(
+                        "11",
+                        LmsLibraryItemType.TRACK,
+                        "Disc 1 Track 1",
+                        discNumber = 1,
+                        trackNumber = 1
+                    )
+                ),
+                offset = 0,
+                totalCount = 3
+            )
+        }
+        val source = LmsAlbumTracksPagingSource(
+            gateway,
+            activePlayer(),
+            LmsLibraryFilter(albumId = "42")
+        )
+
+        val result = source.load(PagingSource.LoadParams.Refresh(null, 30, false))
+
+        assertTrue(result is PagingSource.LoadResult.Page)
+        val page = result as PagingSource.LoadResult.Page
+        assertEquals(listOf("11", "12", "unknown"), page.data.map { it.id })
+    }
+
+    @Test
     fun browsePagingUsesReturnedItemCountAsTheNextOffset() = runTest {
         val gateway = FakeLibraryGateway().apply {
             page = LmsLibraryPage(

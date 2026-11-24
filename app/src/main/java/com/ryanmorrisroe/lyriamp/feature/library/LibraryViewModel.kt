@@ -20,6 +20,7 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySearchResults
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.isLmsArtworkId
+import com.ryanmorrisroe.lyriamp.data.lms.sortedForAlbumTracks
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionTabSnapshot
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionLocation
@@ -182,14 +183,24 @@ class LibraryViewModel(
             }.flow
             request.location.query != null -> {
                 val query = request.location.query
-                Pager(pagingConfig, initialKey = request.initialKey) {
-                    LmsLibraryPagingSource(
-                        libraryGateway,
-                        player,
-                        query,
-                        request.location.filter
-                    )
-                }.flow
+                if (query == LmsLibraryQuery.TRACKS && request.location.filter.albumId != null) {
+                    Pager(pagingConfig, initialKey = request.initialKey) {
+                        LmsAlbumTracksPagingSource(
+                            libraryGateway,
+                            player,
+                            request.location.filter
+                        )
+                    }.flow
+                } else {
+                    Pager(pagingConfig, initialKey = request.initialKey) {
+                        LmsLibraryPagingSource(
+                            libraryGateway,
+                            player,
+                            query,
+                            request.location.filter
+                        )
+                    }.flow
+                }
             }
             else -> flowOf(PagingData.empty())
         }
@@ -545,6 +556,66 @@ class LibraryViewModel(
             maxSize = PAGE_SIZE * 4,
             jumpThreshold = PAGE_SIZE * 4
         )
+    }
+}
+
+internal class LmsAlbumTracksPagingSource(
+    private val gateway: LmsLibraryGateway,
+    private val activePlayer: LmsActivePlayer,
+    private val filter: LmsLibraryFilter
+) : PagingSource<Int, LmsLibraryItem>() {
+    private var sortedAlbumTracks: List<LmsLibraryItem>? = null
+
+    override val jumpingSupported: Boolean = true
+
+    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, LmsLibraryItem> = try {
+        val limit = params.loadSize.coerceIn(1, MAX_PAGE_SIZE)
+        val tracks = sortedAlbumTracks ?: fetchAndSortAlbumTracks()
+        sortedAlbumTracks = tracks
+        val offset = (params.key ?: 0).coerceIn(0, tracks.size)
+        val end = (offset + limit).coerceAtMost(tracks.size)
+        val pageItems = if (offset < end) tracks.subList(offset, end) else emptyList()
+
+        LoadResult.Page(
+            data = pageItems,
+            prevKey = if (offset == 0) null else (offset - limit).coerceAtLeast(0),
+            nextKey = if (end >= tracks.size) null else end,
+            itemsBefore = offset,
+            itemsAfter = (tracks.size - end).coerceAtLeast(0)
+        )
+    } catch (exception: CancellationException) {
+        throw exception
+    } catch (exception: Exception) {
+        LoadResult.Error(exception)
+    }
+
+    private suspend fun fetchAndSortAlbumTracks(): List<LmsLibraryItem> {
+        val tracks = mutableListOf<LmsLibraryItem>()
+        var offset = 0
+        var totalCount: Int? = null
+
+        while (totalCount == null || offset < totalCount) {
+            val page = gateway.getPage(
+                activePlayer.connection,
+                LmsLibraryQuery.TRACKS,
+                offset,
+                MAX_PAGE_SIZE,
+                filter
+            )
+            totalCount = page.totalCount
+            if (page.items.isEmpty()) break
+            tracks.addAll(page.items)
+            offset += page.items.size
+        }
+
+        return tracks.sortedForAlbumTracks()
+    }
+
+    override fun getRefreshKey(state: PagingState<Int, LmsLibraryItem>): Int? =
+        state.anchorPosition
+
+    private companion object {
+        const val MAX_PAGE_SIZE = 100
     }
 }
 

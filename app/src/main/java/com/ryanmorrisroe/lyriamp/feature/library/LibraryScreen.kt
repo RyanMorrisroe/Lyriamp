@@ -583,6 +583,8 @@ fun LibraryScreen(
                     isSearchResults = state.searchText.isNotBlank(),
                     activePlayer = state.activePlayer,
                     isPlayingItem = state.isPlayingItem,
+                    albumTrackListing = state.location.query == LmsLibraryQuery.TRACKS &&
+                        state.location.filter.albumId != null,
                     onOpenItem = viewModel::openItem,
                     onPlayNow = viewModel::playNow,
                     onAddToQueue = { item ->
@@ -624,6 +626,7 @@ private fun LibraryResults(
     isSearchResults: Boolean,
     activePlayer: LmsActivePlayer?,
     isPlayingItem: Boolean,
+    albumTrackListing: Boolean,
     onOpenItem: (LmsLibraryItem) -> Unit,
     onPlayNow: (LmsLibraryItem) -> Unit,
     onAddToQueue: (LmsLibraryItem) -> Unit,
@@ -664,41 +667,70 @@ private fun LibraryResults(
         ) { index ->
             val item = items[index]
             if (item != null) {
+                val loadedDiscNumbers = items.itemSnapshotList.items
+                    .mapNotNull { loadedItem -> loadedItem.discNumber?.takeIf { it > 0 } }
+                    .distinct()
+                val isMultiDiscAlbum = albumTrackListing && loadedDiscNumbers.size > 1
+                val previousDiscNumber = if (index > 0) items.peek(index - 1)?.discNumber else null
+                val discHeaderNumber = item.discNumber?.takeIf { discNumber ->
+                    isMultiDiscAlbum &&
+                        discNumber > 0 &&
+                        (index == 0 || previousDiscNumber != discNumber)
+                }
+                val discTrackCount = discHeaderNumber?.let { discNumber ->
+                    items.itemSnapshotList.items.count { loadedItem ->
+                        loadedItem.discNumber?.takeIf { it > 0 } == discNumber
+                    }
+                } ?: 0
+
                 if (layout == LibraryLayout.COVER_WALL) {
-                    LibraryItemCard(
-                        item = item,
-                        connection = activePlayer?.connection,
-                        isSearchResults = isSearchResults,
-                        isPlayingItem = isPlayingItem,
-                        onResolveArtistArtwork = onResolveArtistArtwork,
-                        onOpen = {
-                            if (queuePickerMode && item.type == LmsLibraryItemType.TRACK) {
-                                onAddToQueue(item)
-                            } else {
-                                onOpenItem(item)
-                            }
-                        },
-                        onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
-                        onAddToQueue = { onAddToQueue(item) },
-                        onPlayNext = { onPlayNext(item) },
-                        isQueueBusy = isQueueBusy,
-                        queuePickerMode = queuePickerMode
-                    )
+                    Column {
+                        if (discHeaderNumber != null) {
+                            AlbumDiscHeader(discHeaderNumber, discTrackCount)
+                        }
+                        LibraryItemCard(
+                            item = item,
+                            connection = activePlayer?.connection,
+                            isSearchResults = isSearchResults,
+                            isPlayingItem = isPlayingItem,
+                            onResolveArtistArtwork = onResolveArtistArtwork,
+                            trackNumber = item.trackNumber,
+                            onOpen = {
+                                if (queuePickerMode && item.type == LmsLibraryItemType.TRACK) {
+                                    onAddToQueue(item)
+                                } else {
+                                    onOpenItem(item)
+                                }
+                            },
+                            onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
+                            onAddToQueue = { onAddToQueue(item) },
+                            onPlayNext = { onPlayNext(item) },
+                            isQueueBusy = isQueueBusy,
+                            queuePickerMode = queuePickerMode
+                        )
+                    }
                 } else {
-                    LibraryItemRow(
-                        item = item,
-                        connection = activePlayer?.connection,
-                        showArtwork = layout == LibraryLayout.COMFORTABLE,
-                        isSearchResults = isSearchResults,
-                        isPlayingItem = isPlayingItem,
-                        onResolveArtistArtwork = onResolveArtistArtwork,
-                        onOpen = { onOpenItem(item) },
-                        onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
-                        onAddToQueue = { onAddToQueue(item) },
-                        onPlayNext = { onPlayNext(item) },
-                        isQueueBusy = isQueueBusy,
-                        queuePickerMode = queuePickerMode
-                    )
+                    Column {
+                        if (discHeaderNumber != null) {
+                            AlbumDiscHeader(discHeaderNumber, discTrackCount)
+                        }
+                        LibraryItemRow(
+                            item = item,
+                            connection = activePlayer?.connection,
+                            showArtwork = layout == LibraryLayout.COMFORTABLE,
+                            isSearchResults = isSearchResults,
+                            isPlayingItem = isPlayingItem,
+                            onResolveArtistArtwork = onResolveArtistArtwork,
+                            trackNumber = item.trackNumber,
+                            showTrackNumber = albumTrackListing,
+                            onOpen = { onOpenItem(item) },
+                            onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
+                            onAddToQueue = { onAddToQueue(item) },
+                            onPlayNext = { onPlayNext(item) },
+                            isQueueBusy = isQueueBusy,
+                            queuePickerMode = queuePickerMode
+                        )
+                    }
                 }
             } else {
                 LoadingRow()
@@ -715,6 +747,43 @@ private fun LibraryResults(
 }
 
 @Composable
+private fun AlbumDiscHeader(discNumber: Int, trackCount: Int) {
+    val shape = RoundedCornerShape(9.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(34.dp)
+            .padding(horizontal = 13.dp)
+            .padding(top = 2.dp, bottom = 2.dp)
+            .testTag("album-disc-header-$discNumber"),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "DISC $discNumber",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (trackCount > 0) {
+                Text(
+                    text = "$trackCount ${if (trackCount == 1) "track" else "tracks"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun LibraryItemRow(
     item: LmsLibraryItem,
     connection: LmsServerConnection?,
@@ -722,6 +791,8 @@ private fun LibraryItemRow(
     isSearchResults: Boolean,
     isPlayingItem: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
+    trackNumber: Int?,
+    showTrackNumber: Boolean,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit,
     onAddToQueue: () -> Unit,
@@ -740,15 +811,31 @@ private fun LibraryItemRow(
                 onOpen()
             }
         },
-        leadingContent = if (showArtwork) {
+        leadingContent = if (showArtwork || (showTrackNumber && trackNumber != null)) {
             {
-                LibraryArtwork(
-                    item = item,
-                    connection = connection,
-                    showTypeLabel = isSearchResults,
-                    onResolveArtistArtwork = onResolveArtistArtwork,
-                    modifier = Modifier.size(52.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (showTrackNumber && trackNumber != null) {
+                        Text(
+                            text = trackNumber.toString(),
+                            modifier = Modifier.width(28.dp),
+                            textAlign = TextAlign.End,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (showArtwork) {
+                        LibraryArtwork(
+                            item = item,
+                            connection = connection,
+                            showTypeLabel = isSearchResults,
+                            onResolveArtistArtwork = onResolveArtistArtwork,
+                            modifier = Modifier.size(52.dp)
+                        )
+                    }
+                }
             }
         } else null,
         headlineContent = { Text(item.title, maxLines = 1) },
@@ -781,6 +868,7 @@ private fun LibraryItemCard(
     isSearchResults: Boolean,
     isPlayingItem: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
+    trackNumber: Int?,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit,
     onAddToQueue: () -> Unit,
@@ -797,7 +885,27 @@ private fun LibraryItemCard(
             onResolveArtistArtwork,
             Modifier.fillMaxWidth().aspectRatio(1f)
         )
-        Text(item.title, maxLines = 1, style = MaterialTheme.typography.titleSmall)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (trackNumber != null) {
+                Text(
+                    text = trackNumber.toString(),
+                    modifier = Modifier.width(24.dp),
+                    textAlign = TextAlign.End,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = item.title,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                style = MaterialTheme.typography.titleSmall
+            )
+        }
         if (subtitle.isNotBlank()) {
             Text(subtitle, maxLines = 1, style = MaterialTheme.typography.bodySmall)
         }

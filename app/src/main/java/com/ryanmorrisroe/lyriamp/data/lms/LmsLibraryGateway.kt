@@ -47,7 +47,10 @@ data class LmsLibraryItem(
     val artworkId: String? = null,
     val artworkUrl: String? = null,
     val isContainer: Boolean = false,
-    val year: String? = null
+    val year: String? = null,
+    val albumId: String? = null,
+    val discNumber: Int? = null,
+    val trackNumber: Int? = null
 )
 
 data class LmsLibraryPage(
@@ -61,6 +64,17 @@ data class LmsLibrarySearchResults(
     val albums: LmsLibraryPage,
     val tracks: LmsLibraryPage
 )
+
+internal fun List<LmsLibraryItem>.sortedForAlbumTracks(): List<LmsLibraryItem> =
+    distinctBy { it.id }
+        .sortedWith(
+            compareBy<LmsLibraryItem>(
+                { it.discNumber?.takeIf { disc -> disc > 0 } ?: 1 }
+            ).thenBy {
+                it.trackNumber?.takeIf { track -> track > 0 } ?: Int.MAX_VALUE
+            }.thenBy { it.title.lowercase() }
+                .thenBy { it.id }
+        )
 
 interface LmsLibraryGateway {
     suspend fun getPage(
