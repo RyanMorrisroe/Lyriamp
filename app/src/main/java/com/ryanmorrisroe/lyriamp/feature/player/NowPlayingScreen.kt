@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -126,35 +128,41 @@ fun NowPlayingScreen(
         .firstOrNull { it.id == connectionState.selectedPlayerId }
         ?.name
         ?.takeIf(String::isNotBlank)
+    val scrollState = rememberScrollState()
 
     Scaffold(
+        modifier = Modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("Now Playing") },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.semantics { contentDescription = "Back" }
-                    ) {
-                        BackArrowIcon(
-                            MaterialTheme.colorScheme.onSurface,
-                            Modifier.size(24.dp)
-                        )
+            Column {
+                TopAppBar(
+                    title = { Text("Now Playing") },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.semantics { contentDescription = "Back" }
+                        ) {
+                            BackArrowIcon(
+                                MaterialTheme.colorScheme.onSurface,
+                                Modifier.size(24.dp)
+                            )
+                        }
+                    },
+                    actions = {
+                        TextButton(onClick = onChoosePlayer) {
+                            Text(currentPlayerName ?: "Players", maxLines = 1)
+                        }
                     }
-                },
-                actions = {
-                    TextButton(onClick = onChoosePlayer) {
-                        Text(currentPlayerName ?: "Players", maxLines = 1)
-                    }
-                }
-            )
+                )
+                NowPlayingDismissHandle(onDismiss = onBack)
+            }
         }
     ) { contentPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
+                .testTag("now-playing-screen")
+                .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -389,6 +397,44 @@ fun NowPlayingScreen(
                 Text(it, color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+}
+
+@Composable
+private fun NowPlayingDismissHandle(onDismiss: () -> Unit) {
+    val dismissalThreshold = with(LocalDensity.current) { 48.dp.toPx() }
+    val latestOnDismiss by rememberUpdatedState(onDismiss)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(32.dp)
+            .pointerInput(dismissalThreshold) {
+                var cumulativeDrag = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { cumulativeDrag = 0f },
+                    onDragEnd = {
+                        val shouldDismiss = cumulativeDrag >= dismissalThreshold
+                        cumulativeDrag = 0f
+                        if (shouldDismiss) latestOnDismiss()
+                    },
+                    onDragCancel = { cumulativeDrag = 0f },
+                    onVerticalDrag = { change, dragAmount ->
+                        cumulativeDrag += dragAmount
+                        change.consume()
+                    }
+                )
+            }
+            .testTag("now-playing-dismiss-handle")
+            .semantics {
+                contentDescription = "Swipe down here to collapse Now Playing"
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier.size(width = 36.dp, height = 4.dp),
+            shape = RoundedCornerShape(2.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+        ) {}
     }
 }
 
