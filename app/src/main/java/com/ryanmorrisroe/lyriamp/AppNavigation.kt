@@ -49,10 +49,12 @@ import com.ryanmorrisroe.lyriamp.feature.connection.ServerSetupScreen
 import com.ryanmorrisroe.lyriamp.feature.library.LibraryScreen
 import com.ryanmorrisroe.lyriamp.feature.library.LibraryLocation
 import com.ryanmorrisroe.lyriamp.feature.library.LibraryViewModel
+import com.ryanmorrisroe.lyriamp.feature.library.HomeViewModel
 import com.ryanmorrisroe.lyriamp.feature.library.libraryLocationKey
 import com.ryanmorrisroe.lyriamp.feature.player.NowPlayingScreen
 import com.ryanmorrisroe.lyriamp.feature.player.PlayerQueueScreen
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
+import com.ryanmorrisroe.lyriamp.feature.settings.HomeCustomizationScreen
 import com.ryanmorrisroe.lyriamp.feature.settings.SettingsScreen
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -63,6 +65,7 @@ fun LyriampAppNavigation(
     connectionViewModel: ConnectionViewModel,
     libraryViewModel: LibraryViewModel,
     displayPreferencesViewModel: DisplayPreferencesViewModel,
+    homeViewModel: HomeViewModel,
     mediaPlayer: Player?,
     lastSessionRepository: LastSessionRepository
 ) {
@@ -267,12 +270,14 @@ fun LyriampAppNavigation(
             LibraryScreen(
                 viewModel = libraryViewModel,
                 connectionViewModel = connectionViewModel,
+                homeViewModel = homeViewModel,
                 mediaPlayer = mediaPlayer,
                 onChangePlayer = {
                     navController.navigate("$PLAYER_SELECTION_ROUTE?origin=library")
                 },
                 displayPreferencesViewModel = displayPreferencesViewModel,
                 onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
+                onCustomizeHome = { navController.navigate(HOME_CUSTOMIZATION_ROUTE) },
                 onOpenNowPlaying = { navController.navigate(NOW_PLAYING_ROUTE) },
                 sessionError = sessionSaveError,
                 onRetrySessionSave = { failedSnapshot?.let { sessionSaves.trySend(it) } },
@@ -316,7 +321,14 @@ fun LyriampAppNavigation(
             SettingsScreen(
                 viewModel = displayPreferencesViewModel,
                 onBack = { navController.popBackStack() },
-                onConnections = { navController.navigate(CONNECTIONS_ROUTE) }
+                onConnections = { navController.navigate(CONNECTIONS_ROUTE) },
+                onCustomizeHome = { navController.navigate(HOME_CUSTOMIZATION_ROUTE) }
+            )
+        }
+        composable(HOME_CUSTOMIZATION_ROUTE) {
+            HomeCustomizationScreen(
+                viewModel = homeViewModel,
+                onBack = { navController.popBackStack() }
             )
         }
         composable(
@@ -386,6 +398,7 @@ private const val QUEUE_PICKER_ROUTE = "library?queuePicker=true"
 private const val NOW_PLAYING_ROUTE = "now-playing"
 private const val PLAYER_QUEUE_ROUTE = "player-queue"
 private const val SETTINGS_ROUTE = "settings"
+private const val HOME_CUSTOMIZATION_ROUTE = "settings/home"
 private const val PROFILE_ID_ARGUMENT = "profileId"
 private const val ORIGIN_ARGUMENT = "origin"
 

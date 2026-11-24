@@ -1242,6 +1242,115 @@ class LmsJsonRpcClientTest {
         }
     }
 
+    @Test
+    fun readsFavoritesAndSupportsNestedAndPlayableItems() = runBlocking {
+        val capturedCommands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            capturedCommands += capturedCommand(request)
+            respondJson(
+                """
+                {"id":1,"result":{"count":2,"favorites_loop":[
+                  {"item_id":"1.1","title":"Jazz","hasitems":1},
+                  {"item_id":"1.2","title":"Autumn Leaves","type":"audio"}
+                ]}}
+                """.trimIndent()
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.FAVORITES,
+                offset = 0,
+                limit = 30,
+                filter = LmsLibraryFilter(favoriteId = "1")
+            )
+
+            assertEquals(2, page.totalCount)
+            assertEquals("Jazz", page.items[0].title)
+            assertTrue(page.items[0].isContainer)
+            assertEquals(LmsLibraryItemType.PLAYLIST, page.items[0].type)
+            assertEquals("1.2", page.items[1].favoriteId)
+            assertEquals(LmsLibraryItemType.TRACK, page.items[1].type)
+            assertTrue(
+                capturedCommands.single().contains("favorites")
+            )
+            assertTrue(
+                capturedCommands.single().contains("item_id:1")
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun playsAPlayableFavoriteThroughTheFavoritesPlaylistCommand() = runBlocking {
+        var capturedFavoriteCommand: List<String>? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedFavoriteCommand = capturedCommand(request)
+            respondJson("""{"id":1,"result":{}}""")
+        })
+
+        try {
+            LmsJsonRpcClient(client).playNow(
+                connection = LmsServerConnection("lms.local"),
+                playerId = "player-1",
+                item = LmsLibraryItem(
+                    id = "1.2",
+                    type = LmsLibraryItemType.TRACK,
+                    title = "Autumn Leaves",
+                    favoriteId = "1.2"
+                )
+            )
+
+            assertEquals(
+                listOf("favorites", "playlist", "play", "item_id:1.2"),
+                capturedFavoriteCommand
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun buildsAShuffleQueueAndStartsPlaybackWithoutAPartialFallback() = runBlocking {
+        val capturedCommands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            val command = capturedCommand(request)
+            capturedCommands += command
+            if (command.contains("titles")) {
+                respondJson(
+                    """
+                    {"id":1,"result":{"count":2,"titles_loop":[
+                      {"id":10,"title":"Blue in Green","album_id":20},
+                      {"id":11,"title":"Autumn Leaves","album_id":21}
+                    ]}}
+                    """.trimIndent()
+                )
+            } else {
+                respondJson("""{"id":1,"result":{}}""")
+            }
+        })
+
+        try {
+            LmsJsonRpcClient(client).shuffleLibrary(
+                connection = LmsServerConnection("lms.local"),
+                playerId = "player-1",
+                scope = LmsShuffleScope.TRACKS
+            )
+
+            assertTrue(capturedCommands.any { it == listOf("playlist", "clear") })
+            assertTrue(capturedCommands.any { command ->
+                command.take(3) == listOf("playlistcontrol", "cmd:add", "track_id:10") ||
+                    command.take(3) == listOf("playlistcontrol", "cmd:add", "track_id:11")
+            })
+            assertTrue(capturedCommands.any { it == listOf("playlist", "shuffle", "0") })
+            assertTrue(capturedCommands.any { it == listOf("play") })
+        } finally {
+            client.close()
+        }
+    }
+
     private fun capturedCommand(request: HttpRequestData?): List<String> {
         val requestJson = Json.parseToJsonElement((request?.body as TextContent).text).jsonObject
         return requestJson["params"]!!.jsonArray[1].jsonArray.map { it.jsonPrimitive.content }

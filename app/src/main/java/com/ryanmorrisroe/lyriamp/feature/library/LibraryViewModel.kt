@@ -69,6 +69,7 @@ private fun sortPreferenceFor(
         LmsLibraryQuery.TRACKS,
         LmsLibraryQuery.PLAYLIST_TRACKS -> LibraryViewType.SONGS
         LmsLibraryQuery.PLAYLISTS,
+        LmsLibraryQuery.FAVORITES,
         null -> null
     } ?: return null
     return preferences[type] ?: when (type) {
@@ -337,6 +338,20 @@ class LibraryViewModel(
         selectTab(tab)
     }
 
+    fun openPinnedLocation(locations: List<LibraryLocation>, tab: LibraryTab) {
+        rememberCurrentTab()
+        mutableSearchText.value = ""
+        mutableRestoredScrollAnchor.value = null
+        mutableSelectedTab.value = tab
+        mutableLocationStack.value = locations
+        mutableLastVisitedTab.value = tab.takeUnless { it == LibraryTab.HOME }
+        if (tab != LibraryTab.HOME) {
+            mutableTabs.update {
+                it + (tab to LibraryTabState(locations))
+            }
+        }
+    }
+
     fun selectTab(tab: LibraryTab) {
         if (tab == mutableSelectedTab.value && mutableSearchText.value.isBlank()) return
         rememberCurrentTab()
@@ -412,11 +427,19 @@ class LibraryViewModel(
                 LmsLibraryFilter(genreId = item.id)
             )
             LmsLibraryItemType.PLAYLIST -> if (item.isContainer) {
-                LibraryLocation(
-                    item.title,
-                    LmsLibraryQuery.PLAYLISTS,
-                    LmsLibraryFilter(folderId = item.id)
-                )
+                if (mutableLocationStack.value.last().query == LmsLibraryQuery.FAVORITES) {
+                    LibraryLocation(
+                        item.title,
+                        LmsLibraryQuery.FAVORITES,
+                        LmsLibraryFilter(favoriteId = item.id)
+                    )
+                } else {
+                    LibraryLocation(
+                        item.title,
+                        LmsLibraryQuery.PLAYLISTS,
+                        LmsLibraryFilter(folderId = item.id)
+                    )
+                }
             } else {
                 LibraryLocation(
                     item.title,
@@ -550,7 +573,30 @@ class LibraryViewModel(
         return artworkUrl
     }
 
-    fun playNow(item: LmsLibraryItem) {
+    suspend fun resolvePinnedArtwork(
+        connection: LmsServerConnection,
+        item: LmsLibraryItem
+    ): String? = when (item.type) {
+        LmsLibraryItemType.ARTIST -> resolveArtistArtwork(connection, item)
+        LmsLibraryItemType.ALBUM -> {
+            val page = libraryGateway.getPage(
+                connection = connection,
+                query = LmsLibraryQuery.ALBUMS,
+                offset = 0,
+                limit = 1,
+                filter = LmsLibraryFilter(albumId = item.id)
+            )
+            val album = page.items.firstOrNull { it.id == item.id }
+                ?: page.items.firstOrNull()
+            album?.artworkUrl
+                ?: album?.artworkId?.let { "/music/$it/cover.jpg" }
+        }
+        LmsLibraryItemType.GENRE,
+        LmsLibraryItemType.PLAYLIST,
+        LmsLibraryItemType.TRACK -> null
+    }
+
+    fun playNow(item: LmsLibraryItem, onCompleted: (() -> Unit)? = null) {
         val player = activePlayerStore.activePlayer.value
         if (player == null) {
             mutableMessage.value = "Select a connected player to play music."
@@ -564,6 +610,7 @@ class LibraryViewModel(
                 libraryGateway.playNow(player.connection, player.playerId, item)
                 mutablePlaybackRevision.update { it + 1 }
                 mutableMessage.value = "Playing ${item.title}."
+                onCompleted?.invoke()
             } catch (exception: CancellationException) {
                 throw exception
             } catch (_: Exception) {

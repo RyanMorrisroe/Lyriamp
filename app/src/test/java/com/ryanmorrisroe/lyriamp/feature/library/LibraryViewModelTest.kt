@@ -801,6 +801,40 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun resolvesPinnedAlbumArtworkFromTheAlbumPage() {
+        runLibraryViewModelTest {
+            val gateway = FakeLibraryGateway().apply {
+                page = LmsLibraryPage(
+                    listOf(
+                        LmsLibraryItem(
+                            id = "42",
+                            type = LmsLibraryItemType.ALBUM,
+                            title = "Blue Train",
+                            artworkUrl = "/music/42/cover.jpg"
+                        )
+                    ),
+                    0,
+                    1
+                )
+            }
+            val viewModel = LibraryViewModel(gateway, LmsActivePlayerStore())
+
+            assertEquals(
+                "/music/42/cover.jpg",
+                viewModel.resolvePinnedArtwork(
+                    LmsServerConnection("lms.local"),
+                    LmsLibraryItem(
+                        id = "42",
+                        type = LmsLibraryItemType.ALBUM,
+                        title = "Blue Train"
+                    )
+                )
+            )
+            advanceUntilIdle()
+        }
+    }
+
+    @Test
     fun cachesResolvedArtistArtworkForRowsRevisitedAfterScrolling() {
         runLibraryViewModelTest {
             val gateway = FakeLibraryGateway().apply {

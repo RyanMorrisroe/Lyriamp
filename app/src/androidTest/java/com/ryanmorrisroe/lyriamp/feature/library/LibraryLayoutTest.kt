@@ -545,6 +545,7 @@ class LibraryLayoutTest {
                 LmsLibraryQuery.GENRES -> LmsLibraryItemType.GENRE
                 LmsLibraryQuery.TRACKS, LmsLibraryQuery.PLAYLIST_TRACKS -> LmsLibraryItemType.TRACK
                 LmsLibraryQuery.PLAYLISTS -> LmsLibraryItemType.PLAYLIST
+                LmsLibraryQuery.FAVORITES -> LmsLibraryItemType.TRACK
             }
             val title = when (type) {
                 LmsLibraryItemType.ARTIST -> "Artist"

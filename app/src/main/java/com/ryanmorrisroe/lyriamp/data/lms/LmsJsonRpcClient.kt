@@ -124,6 +124,42 @@ class LmsJsonRpcClient(
     ): LmsLibraryPage {
         validateLibraryPage(offset, limit)
         val result = request(connection, "", libraryPageCommand(query, offset, limit, filter, search, sort))
+        if (query == LmsLibraryQuery.FAVORITES) {
+            val loop = result["favorites_loop"] as? JsonArray
+                ?: result["item_loop"] as? JsonArray
+                ?: result["items_loop"] as? JsonArray
+                ?: JsonArray(emptyList())
+            val totalCount = result["count"].asInt()
+                ?: result["favorites_count"].asInt()
+                ?: loop.size
+            val items = loop.map { element ->
+                val entry = element as? JsonObject
+                    ?: throw LmsProtocolException("LMS returned an invalid favorites entry.")
+                val favoriteId = entry["item_id"].asText()
+                    ?: entry["id"].asText()
+                    ?: throw LmsProtocolException("LMS favorite entry did not include an item ID.")
+                val title = entry["title"].asText()
+                    ?: entry["name"].asText()
+                    ?: entry["text"].asText()
+                    ?: throw LmsProtocolException("LMS favorite entry did not include a title.")
+                val isContainer = entry["hasitems"].asBoolean() == true ||
+                    entry["type"].asText() in setOf("group", "level", "folder")
+                LmsLibraryItem(
+                    id = favoriteId,
+                    type = if (isContainer) LmsLibraryItemType.PLAYLIST else LmsLibraryItemType.TRACK,
+                    title = title,
+                    artworkId = entry.artworkReference(
+                        arrayOf("coverid", "artwork_track_id", "artwork")
+                    )?.id,
+                    artworkUrl = entry.artworkReference(
+                        arrayOf("coverid", "artwork_track_id", "artwork")
+                    )?.url,
+                    isContainer = isContainer,
+                    favoriteId = favoriteId
+                )
+            }
+            return LmsLibraryPage(items, offset, totalCount)
+        }
         val totalCount = result["count"].asInt()
             ?: throw LmsProtocolException("LMS response did not include a library result count.")
         return LmsLibraryPage(
@@ -243,6 +279,19 @@ class LmsJsonRpcClient(
         item: LmsLibraryItem
     ) {
         require(!item.isContainer) { "A playlist folder cannot be played." }
+        if (item.favoriteId != null) {
+            request(
+                connection,
+                playerId,
+                buildJsonArray {
+                    add(JsonPrimitive("favorites"))
+                    add(JsonPrimitive("playlist"))
+                    add(JsonPrimitive("play"))
+                    add(JsonPrimitive("item_id:${item.favoriteId}"))
+                }
+            )
+            return
+        }
         if (item.type == LmsLibraryItemType.TRACK && item.albumId != null) {
             val albumTracks = getSortedAlbumTracks(connection, item.albumId)
             request(
@@ -267,6 +316,69 @@ class LmsJsonRpcClient(
                 playlistControlCommand("load", item.playlistControlFilterName(), item.id, item.playlistControlSort())
             )
         }
+    }
+
+    override suspend fun shuffleLibrary(
+        connection: LmsServerConnection,
+        playerId: String,
+        scope: LmsShuffleScope
+    ) {
+        val query = when (scope) {
+            LmsShuffleScope.TRACKS -> LmsLibraryQuery.TRACKS
+            LmsShuffleScope.ARTISTS -> LmsLibraryQuery.ARTISTS
+            LmsShuffleScope.ALBUMS -> LmsLibraryQuery.ALBUMS
+        }
+        val candidates = getPage(
+            connection = connection,
+            query = query,
+            offset = 0,
+            limit = 100,
+            sort = null
+        ).items
+            .filterNot { it.isContainer }
+            .shuffled()
+        if (candidates.isEmpty()) {
+            throw LmsProtocolException("The library has no items to shuffle.")
+        }
+
+        request(
+            connection,
+            playerId,
+            buildJsonArray {
+                add(JsonPrimitive("playlist"))
+                add(JsonPrimitive("clear"))
+            }
+        )
+
+        candidates.forEach { item ->
+            request(
+                connection,
+                playerId,
+                playlistControlCommand(
+                    "add",
+                    item.playlistControlFilterName(),
+                    item.id,
+                    item.playlistControlSort()
+                )
+            )
+        }
+
+        request(
+            connection,
+            playerId,
+            buildJsonArray {
+                add(JsonPrimitive("playlist"))
+                add(JsonPrimitive("shuffle"))
+                add(JsonPrimitive("0"))
+            }
+        )
+        request(
+            connection,
+            playerId,
+            buildJsonArray {
+                add(JsonPrimitive("play"))
+            }
+        )
     }
 
     private suspend fun getSortedAlbumTracks(
@@ -622,6 +734,7 @@ class LmsJsonRpcClient(
             LmsLibraryQuery.TRACKS,
             LmsLibraryQuery.PLAYLIST_TRACKS -> add(JsonPrimitive("tags:galdeitKJc"))
             LmsLibraryQuery.PLAYLISTS -> add(JsonPrimitive("tags:suxKJc"))
+            LmsLibraryQuery.FAVORITES -> add(JsonPrimitive("tags:c"))
             LmsLibraryQuery.ARTISTS -> {
                 add(JsonPrimitive("tags:4"))
                 add(JsonPrimitive("role_id:ALBUMARTIST"))
@@ -793,6 +906,7 @@ class LmsJsonRpcClient(
             albumId = this["album_id"].asText()
                 ?: this["albumid"].asText()
                 ?: this["albumId"].asText(),
+                favoriteId = this["item_id"].asText(),
             discNumber = firstInt("disc", "discnumber", "disc_number"),
             trackNumber = firstTrackNumber("tracknum", "tracknumber", "track_number", "track")
         )
@@ -818,6 +932,7 @@ class LmsJsonRpcClient(
         genreId?.takeIf(String::isNotBlank)?.let { add("genre_id:$it") }
         playlistId?.takeIf(String::isNotBlank)?.let { add("playlist_id:$it") }
         folderId?.takeIf(String::isNotBlank)?.let { add("folder_id:$it") }
+        favoriteId?.takeIf(String::isNotBlank)?.let { add("item_id:$it") }
     }
 
     private fun LmsLibraryItem.playlistControlFilterName(): String = when (type) {

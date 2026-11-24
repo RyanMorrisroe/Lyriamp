@@ -10,6 +10,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.AnimatedVisibility
@@ -91,6 +94,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.DpSize
@@ -122,6 +126,10 @@ import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryLayout
 import com.ryanmorrisroe.lyriamp.data.persistence.LibrarySortPreference
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
+import com.ryanmorrisroe.lyriamp.data.persistence.HomePin
+import com.ryanmorrisroe.lyriamp.data.persistence.HomePinKind
+import com.ryanmorrisroe.lyriamp.data.persistence.HomeDensity
+import com.ryanmorrisroe.lyriamp.data.persistence.HomeSpecialAction
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
 import com.ryanmorrisroe.lyriamp.ui.artwork.LmsArtworkImage
@@ -142,9 +150,11 @@ fun LibraryScreen(
     viewModel: LibraryViewModel,
     connectionViewModel: ConnectionViewModel,
     displayPreferencesViewModel: DisplayPreferencesViewModel,
+    homeViewModel: HomeViewModel? = null,
     mediaPlayer: Player?,
     onChangePlayer: () -> Unit,
     onOpenSettings: () -> Unit,
+    onCustomizeHome: () -> Unit = {},
     onOpenNowPlaying: () -> Unit,
     sessionError: String? = null,
     onRetrySessionSave: () -> Unit = {},
@@ -155,6 +165,7 @@ fun LibraryScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val connectionState by connectionViewModel.uiState.collectAsStateWithLifecycle()
     val displayState by displayPreferencesViewModel.state.collectAsStateWithLifecycle()
+    val homeState = homeViewModel?.state?.collectAsStateWithLifecycle()?.value ?: HomeUiState()
     val visibleTabs = remember {
         LibraryTab.entries.filterNot { it == LibraryTab.PLAYLISTS }
     }
@@ -170,6 +181,7 @@ fun LibraryScreen(
         LmsLibraryQuery.GENRES -> LibraryViewType.GENRES
         LmsLibraryQuery.TRACKS, LmsLibraryQuery.PLAYLIST_TRACKS -> LibraryViewType.SONGS
         LmsLibraryQuery.PLAYLISTS -> LibraryViewType.PLAYLISTS
+        LmsLibraryQuery.FAVORITES -> null
         null -> null
     }
     val layout = if (viewType == LibraryViewType.GENRES) {
@@ -497,58 +509,112 @@ fun LibraryScreen(
                 TextButton(onClick = onRetrySessionSave) { Text("Retry saving position") }
             }
             if (state.isAtRoot && state.searchText.isBlank()) {
-                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    Column(
-                        modifier = Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            "Your collection",
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        Text("What sounds good?", style = MaterialTheme.typography.headlineSmall)
-                        Text(
-                            "Browse your music, your way.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                    visibleCategories.chunked(2).forEach { categories ->
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            categories.forEach { category ->
-                                Surface(
-                                    onClick = {
-                                        switchTab(LibraryTab.entries.first { it.query == category.query })
-                                    },
-                                    modifier = Modifier.weight(1f).height(92.dp),
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow
-                                ) {
-                                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                                        Text(category.title, style = MaterialTheme.typography.titleSmall)
-                                        Text("Browse", style = MaterialTheme.typography.labelSmall)
+                PersonalizedHome(
+                    homeState = homeState,
+                    activePlayer = state.activePlayer,
+                    resolver = viewModel::resolvePinnedArtwork,
+                    onCustomize = onCustomizeHome,
+                    onOpenPin = { pin ->
+                        when (pin.kind) {
+                            com.ryanmorrisroe.lyriamp.data.persistence.HomePinKind.LIBRARY_ITEM ->
+                                openPinnedLibraryPin(viewModel, pin)
+                            com.ryanmorrisroe.lyriamp.data.persistence.HomePinKind.SPECIAL -> {
+                                when (pin.specialAction) {
+                                    com.ryanmorrisroe.lyriamp.data.persistence.HomeSpecialAction.FAVORITES -> {
+                                        val location = homeViewModel?.favoritesLocation()
+                                            ?: LibraryLocation("Favorites", LmsLibraryQuery.FAVORITES)
+                                        viewModel.openPinnedLocation(
+                                            listOf(LibraryLocation("Library"), location),
+                                            LibraryTab.HOME
+                                        )
+                                    }
+                                    else -> homeViewModel?.executeSpecialAction(
+                                        pin.specialAction
+                                            ?: HomeSpecialAction.SHUFFLE_TRACKS
+                                    ) {
+                                        connectionViewModel.refreshSelectedPlayer()
                                     }
                                 }
                             }
-                            if (categories.size == 1) Spacer(Modifier.weight(1f))
                         }
-                    }
-                    state.lastVisitedTab
-                        ?.takeUnless { it == LibraryTab.PLAYLISTS }
-                        ?.let { tab ->
-                            ListItem(
-                                modifier = Modifier.clickable { switchTab(tab) },
-                                headlineContent = { Text("Last visited") },
-                                supportingContent = {
-                                    Text(state.tabs[tab]?.locations?.lastOrNull()?.title ?: tab.title)
-                                }
-                            )
+                    },
+                    onOpenShelfItem = { item ->
+                        if (item.type == LmsLibraryItemType.TRACK) {
+                            viewModel.playNow(item) {
+                                connectionViewModel.refreshSelectedPlayer()
+                            }
+                        } else {
+                            viewModel.openItem(item)
                         }
-                }
+                    },
+                    onSeeAll = { sectionType ->
+                        when (sectionType) {
+                            com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.RECENTLY_ADDED_ALBUMS -> {
+                                displayPreferencesViewModel.setSort(
+                                    LibraryViewType.ALBUMS,
+                                    LibrarySortPreference(
+                                        LmsLibrarySort.NEW,
+                                        LmsLibrarySortOrder.DESCENDING
+                                    )
+                                )
+                                switchTab(LibraryTab.ALBUMS)
+                            }
+                            com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.MOST_PLAYED_ALBUMS -> {
+                                displayPreferencesViewModel.setSort(
+                                    LibraryViewType.ALBUMS,
+                                    LibrarySortPreference(
+                                        LmsLibrarySort.PLAY_COUNT,
+                                        LmsLibrarySortOrder.DESCENDING
+                                    )
+                                )
+                                switchTab(LibraryTab.ALBUMS)
+                            }
+                            com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.RECENTLY_PLAYED_ALBUMS -> {
+                                displayPreferencesViewModel.setSort(
+                                    LibraryViewType.ALBUMS,
+                                    LibrarySortPreference(
+                                        LmsLibrarySort.RECENTLY_PLAYED,
+                                        LmsLibrarySortOrder.DESCENDING
+                                    )
+                                )
+                                switchTab(LibraryTab.ALBUMS)
+                            }
+                            com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.RECENTLY_ADDED_ARTISTS -> {
+                                displayPreferencesViewModel.setSort(
+                                    LibraryViewType.ARTISTS,
+                                    LibrarySortPreference(
+                                        LmsLibrarySort.NEW,
+                                        LmsLibrarySortOrder.DESCENDING
+                                    )
+                                )
+                                switchTab(LibraryTab.ARTISTS)
+                            }
+                            com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.MOST_PLAYED_ARTISTS -> {
+                                displayPreferencesViewModel.setSort(
+                                    LibraryViewType.ARTISTS,
+                                    LibrarySortPreference(
+                                        LmsLibrarySort.PLAY_COUNT,
+                                        LmsLibrarySortOrder.DESCENDING
+                                    )
+                                )
+                                switchTab(LibraryTab.ARTISTS)
+                            }
+                            com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.RECENTLY_PLAYED_ARTISTS -> {
+                                displayPreferencesViewModel.setSort(
+                                    LibraryViewType.ARTISTS,
+                                    LibrarySortPreference(
+                                        LmsLibrarySort.RECENTLY_PLAYED,
+                                        LmsLibrarySortOrder.DESCENDING
+                                    )
+                                )
+                                switchTab(LibraryTab.ARTISTS)
+                            }
+                        }
+                    },
+                    onRetryShelf = homeViewModel?.let { vm ->
+                        { type -> vm.retryShelf(type) }
+                    } ?: {}
+                )
             } else {
                 if (viewType != null) {
                     Row(
@@ -1372,15 +1438,19 @@ private fun LibraryLayoutSelector(
 }
 
 private enum class LibraryGlyph {
+    ALBUM_SHUFFLE,
     CLOSE,
     COMPACT,
     COMFORTABLE,
     COVER_WALL,
+    FAVORITES,
     NEXT,
     PAUSE,
     PLAY,
     PREVIOUS,
     SEARCH,
+    SHUFFLE,
+    ARTIST_SHUFFLE,
     MUSIC,
     SPEAKER,
     SETTINGS
@@ -1424,6 +1494,12 @@ private fun LibraryGlyphIcon(
         }
 
         when (glyph) {
+            LibraryGlyph.ALBUM_SHUFFLE -> {
+                rect(3f, 5f, 9f, 9f)
+                rect(12f, 3f, 9f, 9f)
+                line(4f, 17f, 15f, 17f)
+                triangle(Offset(15f, 13f), Offset(21f, 17f), Offset(15f, 21f))
+            }
             LibraryGlyph.CLOSE -> {
                 line(6f, 6f, 18f, 18f)
                 line(18f, 6f, 6f, 18f)
@@ -1443,6 +1519,26 @@ private fun LibraryGlyphIcon(
                         rect(2f + column * 11f, 2f + row * 11f, 9f, 9f)
                     }
                 }
+            }
+            LibraryGlyph.FAVORITES -> {
+                drawCircle(color, 4f * unit, Offset(8f * unit, 9f * unit))
+                drawCircle(color, 4f * unit, Offset(16f * unit, 9f * unit))
+                triangle(Offset(4f, 11f), Offset(20f, 11f), Offset(12f, 21f))
+            }
+            LibraryGlyph.ARTIST_SHUFFLE -> {
+                drawCircle(color, 2.5f * unit, Offset(7f * unit, 7f * unit))
+                drawCircle(color, 2.5f * unit, Offset(15f * unit, 7f * unit))
+                drawCircle(color, 2.5f * unit, Offset(11f * unit, 13f * unit))
+                line(3f, 18f, 13f, 18f)
+                triangle(Offset(13f, 14f), Offset(21f, 18f), Offset(13f, 22f))
+            }
+            LibraryGlyph.SHUFFLE -> {
+                line(4f, 7f, 17f, 7f)
+                triangle(Offset(17f, 3f), Offset(21f, 7f), Offset(17f, 11f))
+                line(4f, 17f, 17f, 17f)
+                triangle(Offset(17f, 13f), Offset(21f, 17f), Offset(17f, 21f))
+                line(8f, 7f, 16f, 17f)
+                line(16f, 7f, 8f, 17f)
             }
             LibraryGlyph.NEXT -> {
                 triangle(Offset(5f, 5f), Offset(15f, 12f), Offset(5f, 19f))
@@ -1976,6 +2072,417 @@ private fun PlayerControlsSheet(
         }
     }
 }
+
+private fun openPinnedLibraryPin(viewModel: LibraryViewModel, pin: HomePin) {
+    val itemType = pin.itemType ?: return
+    val itemId = pin.itemId ?: return
+    val filter = pin.filter
+    val locations = when (itemType) {
+        LmsLibraryItemType.ARTIST -> listOf(
+            LibraryLocation("Library"),
+            LibraryLocation("Artists", LmsLibraryQuery.ARTISTS),
+            LibraryLocation(pin.title, LmsLibraryQuery.ALBUMS, filter)
+        )
+        LmsLibraryItemType.ALBUM -> listOf(
+            LibraryLocation("Library"),
+            LibraryLocation("Albums", LmsLibraryQuery.ALBUMS),
+            LibraryLocation(pin.title, LmsLibraryQuery.TRACKS, filter)
+        )
+        LmsLibraryItemType.GENRE -> listOf(
+            LibraryLocation("Library"),
+            LibraryLocation("Genres", LmsLibraryQuery.GENRES),
+            LibraryLocation(pin.title, LmsLibraryQuery.ARTISTS, filter)
+        )
+        LmsLibraryItemType.PLAYLIST -> listOf(
+            LibraryLocation("Library"),
+            LibraryLocation(pin.title, LmsLibraryQuery.PLAYLIST_TRACKS, filter)
+        )
+        LmsLibraryItemType.TRACK -> listOf(LibraryLocation("Library"))
+    }
+    val tab = when (itemType) {
+        LmsLibraryItemType.ARTIST -> LibraryTab.ARTISTS
+        LmsLibraryItemType.ALBUM -> LibraryTab.ALBUMS
+        LmsLibraryItemType.GENRE -> LibraryTab.GENRES
+        LmsLibraryItemType.PLAYLIST,
+        LmsLibraryItemType.TRACK -> LibraryTab.HOME
+    }
+    viewModel.openPinnedLocation(locations, tab)
+}
+
+@Composable
+private fun PersonalizedHome(
+    homeState: HomeUiState,
+    activePlayer: LmsActivePlayer?,
+    resolver: suspend (LmsServerConnection, LmsLibraryItem) -> String?,
+    onCustomize: () -> Unit,
+    onOpenPin: (com.ryanmorrisroe.lyriamp.data.persistence.HomePin) -> Unit,
+    onOpenShelfItem: (LmsLibraryItem) -> Unit,
+    onSeeAll: (com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType) -> Unit,
+    onRetryShelf: (com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, top = 16.dp, end = 12.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "Your library",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Text(
+                    "Welcome back",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+            }
+            TextButton(onClick = onCustomize) {
+                Text("Customize")
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Pinned", style = MaterialTheme.typography.titleSmall)
+        }
+
+        if (homeState.preferences.pins.isEmpty()) {
+            Surface(
+                onClick = onCustomize,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(72.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("Pin your favorite places", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Add artists, albums, playlists, or shuffle actions.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)
+            ) {
+                items(
+                    items = homeState.preferences.pins,
+                    key = { pin ->
+                        if (pin.kind == com.ryanmorrisroe.lyriamp.data.persistence.HomePinKind.LIBRARY_ITEM) {
+                            "library:${pin.itemType}:${pin.itemId}"
+                        } else {
+                            "special:${pin.specialAction}"
+                        }
+                    }
+                ) { pin ->
+                    PinnedPinCard(
+                        pin = pin,
+                        activePlayer = activePlayer,
+                        resolver = resolver,
+                        density = homeState.preferences.density,
+                        onClick = { onOpenPin(pin) }
+                    )
+                }
+            }
+        }
+
+        homeState.preferences.sections
+            .filter { it.enabled }
+            .forEach { section ->
+                val shelf = homeState.shelves[section.type] ?: HomeShelfState(isLoading = true)
+                HomeShelf(
+                    section = section,
+                    shelf = shelf,
+                    activePlayer = activePlayer,
+                    density = homeState.preferences.density,
+                    onOpenItem = onOpenShelfItem,
+                    onSeeAll = { onSeeAll(section.type) },
+                    onRetry = { onRetryShelf(section.type) }
+                )
+            }
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun PinnedPinCard(
+    pin: HomePin,
+    activePlayer: LmsActivePlayer?,
+    resolver: suspend (LmsServerConnection, LmsLibraryItem) -> String?,
+    density: HomeDensity,
+    onClick: () -> Unit
+) {
+    var resolvedArtworkUrl by remember(pin.artworkUrl, pin.itemId) {
+        mutableStateOf(pin.artworkUrl)
+    }
+
+    LaunchedEffect(pin, activePlayer?.connection, resolver) {
+        if (
+            pin.kind == HomePinKind.LIBRARY_ITEM &&
+            pin.itemType in setOf(LmsLibraryItemType.ARTIST, LmsLibraryItemType.ALBUM) &&
+            activePlayer != null &&
+            resolvedArtworkUrl.isNullOrBlank()
+        ) {
+            resolvedArtworkUrl = resolver(
+                activePlayer.connection,
+                LmsLibraryItem(
+                    id = pin.itemId ?: return@LaunchedEffect,
+                    type = pin.itemType
+                        ?: LmsLibraryItemType.ARTIST,
+                    title = pin.title
+                )
+            )
+        }
+    }
+
+    val (cardWidth, cardHeight) = when (density) {
+        HomeDensity.COMPACT -> 92.dp to 102.dp
+        HomeDensity.COMFORTABLE -> 112.dp to 118.dp
+        HomeDensity.SPACIOUS -> 132.dp to 138.dp
+    }
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .width(cardWidth)
+            .height(cardHeight),
+        shape = RoundedCornerShape(14.dp),
+        color = if (pin.kind == HomePinKind.SPECIAL) {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        }
+    ) {
+        if (pin.kind == HomePinKind.SPECIAL) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(10.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Surface(
+                    modifier = Modifier.size(34.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        LibraryGlyphIcon(
+                            specialPinGlyph(pin.specialAction),
+                            MaterialTheme.colorScheme.onSecondaryContainer,
+                            Modifier.size(22.dp)
+                        )
+                    }
+                }
+                Text(
+                    pin.title,
+                    maxLines = 2,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    shape = RoundedCornerShape(
+                        topStart = 14.dp,
+                        topEnd = 14.dp,
+                        bottomStart = 0.dp,
+                        bottomEnd = 0.dp
+                    ),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest
+                ) {
+                    LmsArtworkImage(
+                        connection = activePlayer?.connection,
+                        artworkId = pin.artworkId,
+                        artworkUrl = resolvedArtworkUrl,
+                        contentDescription = pin.title,
+                        modifier = Modifier.fillMaxSize(),
+                        placeholder = {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    pin.title.take(1).uppercase(),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+                        }
+                    )
+                }
+                Text(
+                    pin.title,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeShelf(
+    section: com.ryanmorrisroe.lyriamp.data.persistence.HomeSection,
+    shelf: HomeShelfState,
+    activePlayer: LmsActivePlayer?,
+    density: HomeDensity,
+    onOpenItem: (LmsLibraryItem) -> Unit,
+    onSeeAll: () -> Unit,
+    onRetry: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            homeSectionTitle(section.type),
+            style = MaterialTheme.typography.titleSmall
+        )
+        TextButton(onClick = onSeeAll) {
+            Text("See all")
+        }
+    }
+    when {
+        shelf.isLoading -> Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.dp
+            )
+        }
+        shelf.error != null -> ErrorRow(shelf.error, onRetry)
+        shelf.items.isEmpty() -> Text(
+            "Nothing to show yet.",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
+        )
+        else -> {
+            val itemWidth = when (density) {
+                HomeDensity.COMPACT -> 104.dp
+                HomeDensity.COMFORTABLE -> 112.dp
+                HomeDensity.SPACIOUS -> 128.dp
+            }
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)
+            ) {
+                items(
+                    items = shelf.items,
+                    key = { item -> "${item.type}:${item.id}" }
+                ) { item ->
+                    Column(
+                        modifier = Modifier
+                            .width(itemWidth)
+                            .clickable(onClick = { onOpenItem(item) })
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer
+                        ) {
+                            LmsArtworkImage(
+                                connection = activePlayer?.connection,
+                                artworkId = item.artworkId,
+                                artworkUrl = item.artworkUrl,
+                                contentDescription = item.title,
+                                modifier = Modifier.fillMaxSize(),
+                                placeholder = {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            item.title.take(1).uppercase(),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                        Text(
+                            item.title,
+                            modifier = Modifier.padding(top = 6.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        item.artist?.takeIf(String::isNotBlank)?.let { artist ->
+                            Text(
+                                artist,
+                                modifier = Modifier.padding(top = 2.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun homeSectionTitle(type: com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType): String =
+    when (type) {
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.RECENTLY_ADDED_ALBUMS -> "Recently added"
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.MOST_PLAYED_ALBUMS -> "Most played"
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.RECENTLY_PLAYED_ALBUMS -> "Recently played"
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.RECENTLY_ADDED_ARTISTS -> "Recently added artists"
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.MOST_PLAYED_ARTISTS -> "Most played artists"
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType.RECENTLY_PLAYED_ARTISTS -> "Recently played artists"
+    }
+
+private fun specialPinGlyph(action: com.ryanmorrisroe.lyriamp.data.persistence.HomeSpecialAction?): LibraryGlyph =
+    when (action) {
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSpecialAction.SHUFFLE_TRACKS -> LibraryGlyph.SHUFFLE
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSpecialAction.SHUFFLE_ARTISTS -> LibraryGlyph.ARTIST_SHUFFLE
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSpecialAction.SHUFFLE_ALBUMS -> LibraryGlyph.ALBUM_SHUFFLE
+        com.ryanmorrisroe.lyriamp.data.persistence.HomeSpecialAction.FAVORITES -> LibraryGlyph.FAVORITES
+        null -> LibraryGlyph.MUSIC
+    }
+
+private fun homeStateDensityIsCompact(
+    @Suppress("UNUSED_PARAMETER") sectionType: com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType,
+    limit: Int
+): Boolean = limit <= 10
 
 @Composable
 private fun LoadingRow() {

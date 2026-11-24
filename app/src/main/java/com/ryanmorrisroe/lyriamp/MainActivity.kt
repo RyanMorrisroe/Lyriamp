@@ -18,6 +18,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
+import com.ryanmorrisroe.lyriamp.feature.library.HomeViewModel
 import com.ryanmorrisroe.lyriamp.feature.library.LibraryViewModel
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
 import com.ryanmorrisroe.lyriamp.data.persistence.Appearance
@@ -53,6 +54,14 @@ class MainActivity : ComponentActivity() {
     private val displayPreferencesViewModel: DisplayPreferencesViewModel by viewModels {
         DisplayPreferencesViewModel.Factory(
             (application as LyriampApplication).displayPreferencesRepository
+        )
+    }
+    private val homeViewModel: HomeViewModel by viewModels {
+        val app = application as LyriampApplication
+        HomeViewModel.Factory(
+            app.libraryGateway,
+            app.activePlayerStore,
+            app.homePreferencesRepository
         )
     }
 
@@ -100,6 +109,7 @@ class MainActivity : ComponentActivity() {
                     connectionViewModel = connectionViewModel,
                     libraryViewModel = libraryViewModel,
                     displayPreferencesViewModel = displayPreferencesViewModel,
+                    homeViewModel = homeViewModel,
                     mediaPlayer = player,
                     lastSessionRepository = (application as LyriampApplication).lastSessionRepository
                 )
