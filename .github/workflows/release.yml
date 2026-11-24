@@ -49,6 +49,9 @@ jobs:
         run: |
           mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/lyriamp-${{ github.ref_name }}.apk
 
+      - name: Verify APK signature
+        run: "$ANDROID_HOME/build-tools/37.0.0/apksigner verify --verbose app/build/outputs/apk/release/lyriamp-${{ github.ref_name }}.apk"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
