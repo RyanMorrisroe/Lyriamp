@@ -1091,9 +1091,13 @@ private fun LibraryLayoutSelector(
     onSelect: (LibraryLayout) -> Unit
 ) {
     val layouts = if (viewType.allowsCoverWall) {
-        LibraryLayout.entries
+        listOf(
+            LibraryLayout.COVER_WALL,
+            LibraryLayout.COMFORTABLE,
+            LibraryLayout.COMPACT
+        )
     } else {
-        listOf(LibraryLayout.COMPACT, LibraryLayout.COMFORTABLE)
+        listOf(LibraryLayout.COMFORTABLE, LibraryLayout.COMPACT)
     }
     val shape = RoundedCornerShape(12.dp)
 
@@ -1110,7 +1114,7 @@ private fun LibraryLayoutSelector(
                     checked = selected,
                     onCheckedChange = { if (it) onSelect(option) },
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(38.dp)
                         .testTag("library-layout-option-${option.name}")
                         .clip(segmentShape)
                         .background(
@@ -1132,7 +1136,7 @@ private fun LibraryLayoutSelector(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(18.dp)
                             .testTag("library-layout-glyph-${option.name}")
                     )
                 }
@@ -1200,8 +1204,7 @@ private fun LibraryGlyphIcon(
             }
             LibraryGlyph.COMPACT -> for (row in 0..3) {
                 val top = 2f + row * 5f
-                rect(2f, top, 3f, 3f)
-                rect(8f, top + 0.5f, 14f, 2f)
+                rect(2f, top + 0.5f, 20f, 2f)
             }
             LibraryGlyph.COMFORTABLE -> for (row in 0..2) {
                 val top = 2f + row * 7f
