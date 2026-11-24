@@ -514,6 +514,14 @@ fun LibraryScreen(
                     activePlayer = state.activePlayer,
                     resolver = viewModel::resolvePinnedArtwork,
                     onCustomize = onCustomizeHome,
+                    isQueueBusy = connectionState.isMutatingPlayerQueue ||
+                        connectionState.isLoadingPlayerQueue,
+                    onAddToQueue = { item ->
+                        connectionViewModel.addPlayerQueueItem(item, LmsQueueAddPosition.END)
+                    },
+                    onPlayNext = { item ->
+                        connectionViewModel.addPlayerQueueItem(item, LmsQueueAddPosition.NEXT)
+                    },
                     onOpenPin = { pin ->
                         when (pin.kind) {
                             com.ryanmorrisroe.lyriamp.data.persistence.HomePinKind.LIBRARY_ITEM ->
@@ -613,6 +621,13 @@ fun LibraryScreen(
                     },
                     onRetryShelf = homeViewModel?.let { vm ->
                         { type -> vm.retryShelf(type) }
+                    } ?: {},
+                    onPlaySection = homeViewModel?.let { vm ->
+                        { type ->
+                            vm.playSection(type) {
+                                connectionViewModel.refreshSelectedPlayer()
+                            }
+                        }
                     } ?: {}
                 )
             } else {
@@ -869,6 +884,7 @@ private fun AlbumDiscHeader(discNumber: Int, trackCount: Int) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryItemRow(
     item: LmsLibraryItem,
@@ -888,65 +904,92 @@ private fun LibraryItemRow(
 ) {
     val canPlay = item.canPlay()
     val subtitle = item.displaySubtitle(isSearchResults)
+    var queueMenuExpanded by remember(item.id) { mutableStateOf(false) }
 
-    ListItem(
-        modifier = Modifier.clickable {
-            if (item.type == LmsLibraryItemType.TRACK) {
-                if (queuePickerMode) onAddToQueue() else onPlayNow()
-            } else {
-                onOpen()
-            }
-        },
-        leadingContent = if (showArtwork || (showTrackNumber && trackNumber != null)) {
-            {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (showTrackNumber && trackNumber != null) {
-                        Text(
-                            text = trackNumber.toString(),
-                            modifier = Modifier.width(28.dp),
-                            textAlign = TextAlign.End,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+    Box(modifier = Modifier.fillMaxWidth()) {
+        ListItem(
+            modifier = Modifier.combinedClickable(
+                enabled = !isQueueBusy || queuePickerMode,
+                onClick = {
+                    if (item.type == LmsLibraryItemType.TRACK) {
+                        if (queuePickerMode) onAddToQueue() else onPlayNow()
+                    } else {
+                        onOpen()
                     }
-                    if (showArtwork) {
-                        LibraryArtwork(
-                            item = item,
-                            connection = connection,
-                            showTypeLabel = isSearchResults,
-                            onResolveArtistArtwork = onResolveArtistArtwork,
-                            modifier = Modifier.size(52.dp)
-                        )
+                },
+                onLongClick = if (
+                    canPlay &&
+                    !queuePickerMode &&
+                    !isQueueBusy
+                ) {
+                    { queueMenuExpanded = true }
+                } else null
+            ),
+            leadingContent = if (showArtwork || (showTrackNumber && trackNumber != null)) {
+                {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (showTrackNumber && trackNumber != null) {
+                            Text(
+                                text = trackNumber.toString(),
+                                modifier = Modifier.width(28.dp),
+                                textAlign = TextAlign.End,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (showArtwork) {
+                            LibraryArtwork(
+                                item = item,
+                                connection = connection,
+                                showTypeLabel = isSearchResults,
+                                onResolveArtistArtwork = onResolveArtistArtwork,
+                                modifier = Modifier.size(52.dp)
+                            )
+                        }
                     }
                 }
+            } else null,
+            headlineContent = { Text(item.title, maxLines = 1) },
+            supportingContent = if (subtitle.isNotBlank()) {
+                {
+                    Text(subtitle, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else null,
+            trailingContent = {
+                if (canPlay) {
+                    LibraryPlayButton(
+                        itemTitle = item.title,
+                        isBusy = isPlayingItem || isQueueBusy,
+                        queuePickerMode = queuePickerMode,
+                        onPlayNow = onPlayNow,
+                        onAddToQueue = onAddToQueue,
+                        onPlayNext = onPlayNext
+                    )
+                } else {
+                    TextButton(onClick = onOpen) { Text(if (item.isContainer) "Open" else "Browse") }
+                }
             }
-        } else null,
-        headlineContent = { Text(item.title, maxLines = 1) },
-        supportingContent = if (subtitle.isNotBlank()) {
-            {
-                Text(subtitle, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        )
+        LibraryQueueActionMenu(
+            expanded = queueMenuExpanded,
+            itemTitle = item.title,
+            onDismiss = { queueMenuExpanded = false },
+            onAddToEnd = {
+                queueMenuExpanded = false
+                onAddToQueue()
+            },
+            onPlayNext = {
+                queueMenuExpanded = false
+                onPlayNext()
             }
-        } else null,
-        trailingContent = {
-            if (canPlay) {
-                LibraryPlayButton(
-                    itemTitle = item.title,
-                    isBusy = isPlayingItem || isQueueBusy,
-                    queuePickerMode = queuePickerMode,
-                    onPlayNow = onPlayNow,
-                    onAddToQueue = onAddToQueue,
-                    onPlayNext = onPlayNext
-                )
-            } else {
-                TextButton(onClick = onOpen) { Text(if (item.isContainer) "Open" else "Browse") }
-            }
-        }
-    )
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryItemCard(
     item: LmsLibraryItem,
@@ -962,49 +1005,108 @@ private fun LibraryItemCard(
     isQueueBusy: Boolean,
     queuePickerMode: Boolean
 ) {
-    Column(Modifier.padding(8.dp).clickable(onClick = onOpen)) {
-        val subtitle = item.displaySubtitle(isSearchResults)
-        LibraryArtwork(
-            item,
-            connection,
-            isSearchResults,
-            onResolveArtistArtwork,
-            Modifier.fillMaxWidth().aspectRatio(1f)
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+    val canPlay = item.canPlay()
+    var queueMenuExpanded by remember(item.id) { mutableStateOf(false) }
+
+    Box(modifier = Modifier.padding(8.dp)) {
+        Column(
+            Modifier.combinedClickable(
+                enabled = !isQueueBusy || queuePickerMode,
+                onClick = {
+                    if (item.type == LmsLibraryItemType.TRACK) {
+                        if (queuePickerMode) onAddToQueue() else onPlayNow()
+                    } else {
+                        onOpen()
+                    }
+                },
+                onLongClick = if (
+                    canPlay &&
+                    !queuePickerMode &&
+                    !isQueueBusy
+                ) {
+                    { queueMenuExpanded = true }
+                } else null
+            )
         ) {
-            if (trackNumber != null) {
+            val subtitle = item.displaySubtitle(isSearchResults)
+            LibraryArtwork(
+                item,
+                connection,
+                isSearchResults,
+                onResolveArtistArtwork,
+                Modifier.fillMaxWidth().aspectRatio(1f)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (trackNumber != null) {
+                    Text(
+                        text = trackNumber.toString(),
+                        modifier = Modifier.width(24.dp),
+                        textAlign = TextAlign.End,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Text(
-                    text = trackNumber.toString(),
-                    modifier = Modifier.width(24.dp),
-                    textAlign = TextAlign.End,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = item.title,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    style = MaterialTheme.typography.titleSmall
                 )
             }
-            Text(
-                text = item.title,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                style = MaterialTheme.typography.titleSmall
-            )
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, maxLines = 1, style = MaterialTheme.typography.bodySmall)
+            }
+            if (canPlay) {
+                LibraryPlayButton(
+                    itemTitle = item.title,
+                    isBusy = isPlayingItem || isQueueBusy,
+                    queuePickerMode = queuePickerMode,
+                    onPlayNow = onPlayNow,
+                    onAddToQueue = onAddToQueue,
+                    onPlayNext = onPlayNext
+                )
+            }
         }
-        if (subtitle.isNotBlank()) {
-            Text(subtitle, maxLines = 1, style = MaterialTheme.typography.bodySmall)
-        }
-        if (item.canPlay()) {
-            LibraryPlayButton(
-                itemTitle = item.title,
-                isBusy = isPlayingItem || isQueueBusy,
-                queuePickerMode = queuePickerMode,
-                onPlayNow = onPlayNow,
-                onAddToQueue = onAddToQueue,
-                onPlayNext = onPlayNext
-            )
-        }
+        LibraryQueueActionMenu(
+            expanded = queueMenuExpanded,
+            itemTitle = item.title,
+            onDismiss = { queueMenuExpanded = false },
+            onAddToEnd = {
+                queueMenuExpanded = false
+                onAddToQueue()
+            },
+            onPlayNext = {
+                queueMenuExpanded = false
+                onPlayNext()
+            }
+        )
+    }
+}
+
+@Composable
+private fun LibraryQueueActionMenu(
+    expanded: Boolean,
+    itemTitle: String,
+    onDismiss: () -> Unit,
+    onAddToEnd: () -> Unit,
+    onPlayNext: () -> Unit
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss
+    ) {
+        DropdownMenuItem(
+            text = { Text("Play next") },
+            onClick = onPlayNext
+        )
+        DropdownMenuItem(
+            text = { Text("Add to end") },
+            onClick = onAddToEnd
+        )
     }
 }
 
@@ -1048,25 +1150,19 @@ private fun LibraryPlayButton(
                 )
             }
         }
-        DropdownMenu(
+        LibraryQueueActionMenu(
             expanded = menuExpanded,
-            onDismissRequest = { menuExpanded = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("Add to end") },
-                onClick = {
-                    menuExpanded = false
-                    onAddToQueue()
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Play next") },
-                onClick = {
-                    menuExpanded = false
-                    onPlayNext()
-                }
-            )
-        }
+            itemTitle = itemTitle,
+            onDismiss = { menuExpanded = false },
+            onAddToEnd = {
+                menuExpanded = false
+                onAddToQueue()
+            },
+            onPlayNext = {
+                menuExpanded = false
+                onPlayNext()
+            }
+        )
     }
 }
 
@@ -2115,10 +2211,14 @@ private fun PersonalizedHome(
     activePlayer: LmsActivePlayer?,
     resolver: suspend (LmsServerConnection, LmsLibraryItem) -> String?,
     onCustomize: () -> Unit,
+    isQueueBusy: Boolean,
+    onAddToQueue: (LmsLibraryItem) -> Unit,
+    onPlayNext: (LmsLibraryItem) -> Unit,
     onOpenPin: (com.ryanmorrisroe.lyriamp.data.persistence.HomePin) -> Unit,
     onOpenShelfItem: (LmsLibraryItem) -> Unit,
     onSeeAll: (com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType) -> Unit,
-    onRetryShelf: (com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType) -> Unit
+    onRetryShelf: (com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType) -> Unit,
+    onPlaySection: (com.ryanmorrisroe.lyriamp.data.persistence.HomeSectionType) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -2201,6 +2301,9 @@ private fun PersonalizedHome(
                         activePlayer = activePlayer,
                         resolver = resolver,
                         density = homeState.preferences.density,
+                        isQueueBusy = isQueueBusy,
+                        onAddToQueue = onAddToQueue,
+                        onPlayNext = onPlayNext,
                         onClick = { onOpenPin(pin) }
                     )
                 }
@@ -2216,9 +2319,13 @@ private fun PersonalizedHome(
                     shelf = shelf,
                     activePlayer = activePlayer,
                     density = homeState.preferences.density,
+                    isQueueBusy = isQueueBusy,
+                    onAddToQueue = onAddToQueue,
+                    onPlayNext = onPlayNext,
                     onOpenItem = onOpenShelfItem,
                     onSeeAll = { onSeeAll(section.type) },
-                    onRetry = { onRetryShelf(section.type) }
+                    onRetry = { onRetryShelf(section.type) },
+                    onPlay = { onPlaySection(section.type) }
                 )
             }
         Spacer(Modifier.height(12.dp))
@@ -2231,8 +2338,28 @@ private fun PinnedPinCard(
     activePlayer: LmsActivePlayer?,
     resolver: suspend (LmsServerConnection, LmsLibraryItem) -> String?,
     density: HomeDensity,
+    isQueueBusy: Boolean,
+    onAddToQueue: (LmsLibraryItem) -> Unit,
+    onPlayNext: (LmsLibraryItem) -> Unit,
     onClick: () -> Unit
 ) {
+    var queueMenuExpanded by remember(pin.itemId ?: pin.specialAction?.name) {
+        mutableStateOf(false)
+    }
+    val pinnedItem = if (pin.kind == HomePinKind.LIBRARY_ITEM) {
+        val itemId = pin.itemId
+        val itemType = pin.itemType
+        if (itemId != null && itemType != null) {
+            LmsLibraryItem(
+                id = itemId,
+                type = itemType,
+                title = pin.title,
+                artworkId = pin.artworkId,
+                artworkUrl = pin.artworkUrl
+            )
+        } else null
+    } else null
+
     var resolvedArtworkUrl by remember(pin.artworkUrl, pin.itemId) {
         mutableStateOf(pin.artworkUrl)
     }
@@ -2261,90 +2388,115 @@ private fun PinnedPinCard(
         HomeDensity.COMFORTABLE -> 112.dp to 118.dp
         HomeDensity.SPACIOUS -> 132.dp to 138.dp
     }
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .width(cardWidth)
-            .height(cardHeight),
-        shape = RoundedCornerShape(14.dp),
-        color = if (pin.kind == HomePinKind.SPECIAL) {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        } else {
-            MaterialTheme.colorScheme.surfaceContainer
-        }
-    ) {
-        if (pin.kind == HomePinKind.SPECIAL) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(10.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                Surface(
-                    modifier = Modifier.size(34.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.secondaryContainer
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+
+    Box(modifier = Modifier.width(cardWidth).height(cardHeight)) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .combinedClickable(
+                    enabled = !isQueueBusy || pin.kind == HomePinKind.SPECIAL,
+                    onClick = onClick,
+                    onLongClick = if (
+                        pin.kind == HomePinKind.LIBRARY_ITEM &&
+                        pinnedItem != null &&
+                        !isQueueBusy
                     ) {
-                        LibraryGlyphIcon(
-                            specialPinGlyph(pin.specialAction),
-                            MaterialTheme.colorScheme.onSecondaryContainer,
-                            Modifier.size(22.dp)
-                        )
-                    }
-                }
-                Text(
-                    pin.title,
-                    maxLines = 2,
-                    style = MaterialTheme.typography.labelLarge
-                )
+                        { queueMenuExpanded = true }
+                    } else null
+                ),
+            shape = RoundedCornerShape(14.dp),
+            color = if (pin.kind == HomePinKind.SPECIAL) {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
             }
-        } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    shape = RoundedCornerShape(
-                        topStart = 14.dp,
-                        topEnd = 14.dp,
-                        bottomStart = 0.dp,
-                        bottomEnd = 0.dp
-                    ),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest
+        ) {
+            if (pin.kind == HomePinKind.SPECIAL) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(10.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    LmsArtworkImage(
-                        connection = activePlayer?.connection,
-                        artworkId = pin.artworkId,
-                        artworkUrl = resolvedArtworkUrl,
-                        contentDescription = pin.title,
-                        modifier = Modifier.fillMaxSize(),
-                        placeholder = {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    pin.title.take(1).uppercase(),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.titleSmall
-                                )
-                            }
+                    Surface(
+                        modifier = Modifier.size(34.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            LibraryGlyphIcon(
+                                specialPinGlyph(pin.specialAction),
+                                MaterialTheme.colorScheme.onSecondaryContainer,
+                                Modifier.size(22.dp)
+                            )
                         }
+                    }
+                    Text(
+                        pin.title,
+                        maxLines = 2,
+                        style = MaterialTheme.typography.labelLarge
                     )
                 }
-                Text(
-                    pin.title,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelMedium
-                )
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        shape = RoundedCornerShape(
+                            topStart = 14.dp,
+                            topEnd = 14.dp,
+                            bottomStart = 0.dp,
+                            bottomEnd = 0.dp
+                        ),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest
+                    ) {
+                        LmsArtworkImage(
+                            connection = activePlayer?.connection,
+                            artworkId = pin.artworkId,
+                            artworkUrl = resolvedArtworkUrl,
+                            contentDescription = pin.title,
+                            modifier = Modifier.fillMaxSize(),
+                            placeholder = {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        pin.title.take(1).uppercase(),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                }
+                            }
+                        )
+                    }
+                    Text(
+                        pin.title,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
             }
         }
+        LibraryQueueActionMenu(
+            expanded = queueMenuExpanded,
+            itemTitle = pin.title,
+            onDismiss = { queueMenuExpanded = false },
+            onAddToEnd = {
+                queueMenuExpanded = false
+                pinnedItem?.let(onAddToQueue)
+            },
+            onPlayNext = {
+                queueMenuExpanded = false
+                pinnedItem?.let(onPlayNext)
+            }
+        )
     }
 }
 
@@ -2354,9 +2506,13 @@ private fun HomeShelf(
     shelf: HomeShelfState,
     activePlayer: LmsActivePlayer?,
     density: HomeDensity,
+    isQueueBusy: Boolean,
+    onAddToQueue: (LmsLibraryItem) -> Unit,
+    onPlayNext: (LmsLibraryItem) -> Unit,
     onOpenItem: (LmsLibraryItem) -> Unit,
     onSeeAll: () -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onPlay: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -2369,10 +2525,31 @@ private fun HomeShelf(
             homeSectionTitle(section.type),
             style = MaterialTheme.typography.titleSmall
         )
-        TextButton(onClick = onSeeAll) {
-            Text("See all")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            IconButton(
+                onClick = onPlay,
+                enabled = !shelf.isLoading && shelf.error == null && shelf.items.isNotEmpty(),
+                modifier = Modifier
+                    .size(40.dp)
+                    .semantics {
+                        contentDescription = "Play ${homeSectionTitle(section.type)}"
+                    }
+            ) {
+                LibraryGlyphIcon(
+                    LibraryGlyph.PLAY,
+                    MaterialTheme.colorScheme.primary,
+                    Modifier.size(20.dp)
+                )
+            }
+            TextButton(onClick = onSeeAll) {
+                Text("See all")
+            }
         }
     }
+
     when {
         shelf.isLoading -> Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
@@ -2405,54 +2582,75 @@ private fun HomeShelf(
                     items = shelf.items,
                     key = { item -> "${item.type}:${item.id}" }
                 ) { item ->
-                    Column(
-                        modifier = Modifier
-                            .width(itemWidth)
-                            .clickable(onClick = { onOpenItem(item) })
-                    ) {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer
-                        ) {
-                            LmsArtworkImage(
-                                connection = activePlayer?.connection,
-                                artworkId = item.artworkId,
-                                artworkUrl = item.artworkUrl,
-                                contentDescription = item.title,
-                                modifier = Modifier.fillMaxSize(),
-                                placeholder = {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            item.title.take(1).uppercase(),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
+                    var queueMenuExpanded by remember(item.id) { mutableStateOf(false) }
+
+                    Box(modifier = Modifier.width(itemWidth)) {
+                        Column(
+                            modifier = Modifier.combinedClickable(
+                                enabled = !isQueueBusy,
+                                onClick = { onOpenItem(item) },
+                                onLongClick = if (!isQueueBusy && item.canPlay()) {
+                                    { queueMenuExpanded = true }
+                                } else null
                             )
-                        }
-                        Text(
-                            item.title,
-                            modifier = Modifier.padding(top = 6.dp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        item.artist?.takeIf(String::isNotBlank)?.let { artist ->
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer
+                            ) {
+                                LmsArtworkImage(
+                                    connection = activePlayer?.connection,
+                                    artworkId = item.artworkId,
+                                    artworkUrl = item.artworkUrl,
+                                    contentDescription = item.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    placeholder = {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                item.title.take(1).uppercase(),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                )
+                            }
                             Text(
-                                artist,
-                                modifier = Modifier.padding(top = 2.dp),
+                                item.title,
+                                modifier = Modifier.padding(top = 6.dp),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall
+                                style = MaterialTheme.typography.labelLarge
                             )
+                            item.artist?.takeIf(String::isNotBlank)?.let { artist ->
+                                Text(
+                                    artist,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                         }
+                        LibraryQueueActionMenu(
+                            expanded = queueMenuExpanded,
+                            itemTitle = item.title,
+                            onDismiss = { queueMenuExpanded = false },
+                            onAddToEnd = {
+                                queueMenuExpanded = false
+                                onAddToQueue(item)
+                            },
+                            onPlayNext = {
+                                queueMenuExpanded = false
+                                onPlayNext(item)
+                            }
+                        )
                     }
                 }
             }

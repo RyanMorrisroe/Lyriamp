@@ -87,6 +87,38 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun playSectionUsesTheLoadedShelfItemsAndRefreshesPlayback() = runTest {
+        val store = LmsActivePlayerStore()
+        store.select(
+            LmsActivePlayer(
+                connection = LmsServerConnection("lms.local"),
+                playerId = "player-1",
+                playerName = "Living Room"
+            )
+        )
+        val gateway = FakeHomeLibraryGateway()
+        val viewModel = HomeViewModel(
+            gateway,
+            store,
+            FakeHomePreferencesRepository()
+        )
+        advanceUntilIdle()
+
+        var refreshed = false
+        viewModel.playSection(HomeSectionType.RECENTLY_ADDED_ALBUMS) {
+            refreshed = true
+        }
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf("Test item"),
+            gateway.playedSectionItems?.map { it.title }
+        )
+        assertTrue(refreshed)
+        assertTrue(viewModel.state.value.actionMessage?.contains("Playing") == true)
+    }
+
+    @Test
     fun artistShelvesResolvePortraitArtwork() = runTest {
         val store = LmsActivePlayerStore()
         val gateway = FakeHomeLibraryGateway()
@@ -437,6 +469,7 @@ class HomeViewModelTest {
         var pageError: Exception? = null
         var searchError: Exception? = null
         var artistArtworkUrl: String? = "/contributor/1/image"
+        var playedSectionItems: List<LmsLibraryItem>? = null
 
         override suspend fun getPage(
             connection: LmsServerConnection,
@@ -511,6 +544,14 @@ class HomeViewModelTest {
             playerId: String,
             item: LmsLibraryItem
         ) = Unit
+
+        override suspend fun playNowSection(
+            connection: LmsServerConnection,
+            playerId: String,
+            items: List<LmsLibraryItem>
+        ) {
+            playedSectionItems = items
+        }
 
         override suspend fun shuffleLibrary(
             connection: LmsServerConnection,

@@ -288,6 +288,51 @@ class HomeViewModel(
         }
     }
 
+    fun playSection(
+        sectionType: HomeSectionType,
+        onCompleted: (() -> Unit)? = null
+    ) {
+        val player = activePlayerStore.activePlayer.value
+        if (player == null) {
+            mutableState.update { it.copy(actionMessage = "Select a connected player first.") }
+            return
+        }
+        val items = mutableState.value.shelves[sectionType]?.items.orEmpty()
+            .filterNot { it.isContainer }
+        if (items.isEmpty()) {
+            mutableState.update { it.copy(actionMessage = "This section has nothing to play.") }
+            return
+        }
+        mutableState.update {
+            it.copy(isExecutingAction = true, actionMessage = null)
+        }
+        viewModelScope.launch {
+            try {
+                libraryGateway.playNowSection(
+                    player.connection,
+                    player.playerId,
+                    items
+                )
+                mutableState.update {
+                    it.copy(
+                        isExecutingAction = false,
+                        actionMessage = "Playing ${sectionTitle(sectionType)}."
+                    )
+                }
+                onCompleted?.invoke()
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                mutableState.update {
+                    it.copy(
+                        isExecutingAction = false,
+                        actionMessage = "Could not play this section."
+                    )
+                }
+            }
+        }
+    }
+
     fun clearActionMessage() {
         mutableState.update { it.copy(actionMessage = null) }
     }
@@ -426,6 +471,15 @@ class HomeViewModel(
             ) as T
         }
     }
+}
+
+private fun sectionTitle(type: HomeSectionType): String = when (type) {
+    HomeSectionType.RECENTLY_ADDED_ALBUMS -> "recently added albums"
+    HomeSectionType.MOST_PLAYED_ALBUMS -> "most played albums"
+    HomeSectionType.RECENTLY_PLAYED_ALBUMS -> "recently played albums"
+    HomeSectionType.RECENTLY_ADDED_ARTISTS -> "recently added artists"
+    HomeSectionType.MOST_PLAYED_ARTISTS -> "most played artists"
+    HomeSectionType.RECENTLY_PLAYED_ARTISTS -> "recently played artists"
 }
 
 private fun LmsLibraryItemType.displayName(): String = when (this) {

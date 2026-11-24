@@ -1313,6 +1313,46 @@ class LmsJsonRpcClientTest {
     }
 
     @Test
+    fun playNowSectionLoadsTheFirstItemAndAddsTheRemainingItems() = runBlocking {
+        val capturedCommands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            capturedCommands += capturedCommand(request)
+            respondJson("""{"id":1,"result":{}}""")
+        })
+
+        try {
+            LmsJsonRpcClient(client).playNowSection(
+                connection = LmsServerConnection("lms.local"),
+                playerId = "player-1",
+                items = listOf(
+                    LmsLibraryItem(
+                        id = "42",
+                        type = LmsLibraryItemType.ALBUM,
+                        title = "Blue Train"
+                    ),
+                    LmsLibraryItem(
+                        id = "43",
+                        type = LmsLibraryItemType.ALBUM,
+                        title = "Kind of Blue"
+                    )
+                )
+            )
+
+            assertEquals(
+                listOf("playlistcontrol", "cmd:load", "album_id:42"),
+                capturedCommands.first()
+            )
+            assertEquals(
+                listOf("playlistcontrol", "cmd:add", "album_id:43"),
+                capturedCommands.last()
+            )
+            assertEquals(2, capturedCommands.size)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun buildsAShuffleQueueAndStartsPlaybackWithoutAPartialFallback() = runBlocking {
         val capturedCommands = mutableListOf<List<String>>()
         val client = HttpClient(MockEngine { request ->

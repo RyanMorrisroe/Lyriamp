@@ -318,6 +318,29 @@ class LmsJsonRpcClient(
         }
     }
 
+    override suspend fun playNowSection(
+        connection: LmsServerConnection,
+        playerId: String,
+        items: List<LmsLibraryItem>
+    ) {
+        val playableItems = items.filterNot { it.isContainer }
+        require(playableItems.isNotEmpty()) { "A list must contain at least one playable item." }
+
+        playNow(connection, playerId, playableItems.first())
+        playableItems.drop(1).forEach { item ->
+            request(
+                connection,
+                playerId,
+                playlistControlCommand(
+                    "add",
+                    item.playlistControlFilterName(),
+                    item.id,
+                    item.playlistControlSort()
+                )
+            )
+        }
+    }
+
     override suspend fun shuffleLibrary(
         connection: LmsServerConnection,
         playerId: String,

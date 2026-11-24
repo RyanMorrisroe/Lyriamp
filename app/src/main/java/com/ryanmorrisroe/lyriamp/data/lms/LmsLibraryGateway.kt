@@ -172,6 +172,14 @@ interface LmsLibraryGateway {
         item: LmsLibraryItem
     )
 
+    suspend fun playNowSection(
+        connection: LmsServerConnection,
+        playerId: String,
+        items: List<LmsLibraryItem>
+    ) {
+        throw UnsupportedOperationException("Play section is not implemented by this gateway.")
+    }
+
     suspend fun shuffleLibrary(
         connection: LmsServerConnection,
         playerId: String,
