@@ -10,16 +10,16 @@ Lyriamp is a native Android remote controller for [Lyrion Music Server (LMS)](ht
 - Automatically save a server profile after a successful connection and reconnect to saved profiles from the Connections screen.
 - List server players with their current track, select an individual player, build temporary groups by dragging rooms, and control player power.
 - Save named multi-player groups per LMS server, select them for synchronized playback, and delete presets without changing live sync.
-- Browse Home, artists, albums, genres, songs, and playlists in tabs with bounded infinite scrolling.
-- Choose artwork-grid, compact, or comfortable layouts for artists, albums, and genres; songs, playlists, and search offer compact and comfortable lists. Layout choices are remembered separately by type.
+- Browse Home, artists, albums, genres, and songs in tabs with bounded infinite scrolling. Playlist browsing is temporarily hidden.
+- Choose artwork-grid, compact, or comfortable layouts for artists, albums, and genres; songs and search offer compact and comfortable lists. Layout choices are remembered separately by type.
 - Search artists, albums, and tracks across the library, and view LMS artwork when available.
 - Choose light, dark, or system appearance under Settings; colors follow the device's Android palette.
-- Play a track, album, or playlist now on the selected LMS player group; playback remains on the LMS players.
+- Play a track or album now on the selected LMS player group; playback remains on the LMS players.
 - Long-press a library item's Play action to add it to the queue end or play it next without replacing the current playlist.
-- Add playable tracks, albums, artists, genres, and playlists from the full-screen player's Library picker; playlist folders remain browse-only.
+- Add playable tracks, albums, artists, and genres from the full-screen player's Library picker.
 - Review upcoming tracks, remove them, and move them up or down in the full queue. The current track cannot be edited.
 - View current track title, artist, album, playback position, and duration.
-- Open a full-screen Now Playing view with artwork, seek, transport, volume, shuffle, repeat, and an Up next preview.
+- Open a full-screen Now Playing view with artwork, seek, transport, volume, shuffle, repeat, and an Up next preview. Swipe the player strip up or tap the track artwork to open it.
 - Open the current artist's albums or album's tracks from the player; unmatched or ambiguous metadata opens global Library search.
 - Play, pause, stop, skip tracks, and seek when supported by the player.
 - Set volume, mute, shuffle mode, and repeat mode.
@@ -45,8 +45,8 @@ No LMS version compatibility matrix has been published yet. A reachable LMS serv
 
 1. From Connections, choose **Add server** and enter a hostname or IP address without a scheme or path. The default port is `9000`; change it if your LMS server uses another port.
 2. Choose HTTP or HTTPS, enter LMS credentials if authentication is enabled, and connect. On API 37, grant local-network access when Android prompts for it. Successful connections are saved as profiles.
-3. On the Players screen, select a connected room or saved group, or build a temporary group by dragging rooms into the current selection. Choose **Control** to open the library. Select a track or use an album or playlist's **Play** action to replace the current playlist and start playback. Long-press **Play** to add the item to the queue end or play it next.
-4. Use the player strip for transport and seek controls. Open the track details for full-screen Now Playing, including volume, shuffle, repeat, and the upcoming queue. Use **+ Add** to pick more library items, **Full queue** to reorder or remove upcoming tracks, and the artist or album details to browse the library. Change players without losing the current library location; use **Settings → Connections** to switch servers and **Settings → Display** to change appearance.
+3. On the Players screen, select a connected room or saved group, or build a temporary group by dragging rooms into the current selection. Choose **Control** to open the library. Select a track or use an album's **Play** action to replace the current playlist and start playback. Long-press **Play** to add the item to the queue end or play it next.
+4. Use the player strip for transport and seek controls. Swipe it upward or tap its track artwork to open full-screen Now Playing, including volume, shuffle, repeat, and the upcoming queue; drag down from the centered handle beneath the toolbar to return to the player strip. Use **+ Add** to pick more library items, **Full queue** to reorder or remove upcoming tracks, and the artist or album details to browse the library. Change players without losing the current library location; use **Settings → Connections** to switch servers and **Settings → Display** to change appearance.
 5. Select a saved server profile to reconnect immediately. On later launches, Lyriamp restores the last session automatically when its server and player are available. The saved-session snapshot contains no credentials.
 
 The app does not scan for servers. IPv4, hostnames, and IPv6 addresses can be entered manually.

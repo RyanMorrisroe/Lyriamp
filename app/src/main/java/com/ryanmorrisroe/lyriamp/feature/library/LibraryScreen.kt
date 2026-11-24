@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +30,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -75,11 +80,15 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -139,6 +148,12 @@ fun LibraryScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val connectionState by connectionViewModel.uiState.collectAsStateWithLifecycle()
     val displayState by displayPreferencesViewModel.state.collectAsStateWithLifecycle()
+    val visibleTabs = remember {
+        LibraryTab.entries.filterNot { it == LibraryTab.PLAYLISTS }
+    }
+    val visibleCategories = remember {
+        libraryCategories.filterNot { it.query == LmsLibraryQuery.PLAYLISTS }
+    }
     var searchVisible by remember { mutableStateOf(false) }
     var actionsExpanded by remember { mutableStateOf(false) }
     val items = viewModel.items.collectAsLazyPagingItems()
@@ -375,12 +390,12 @@ fun LibraryScreen(
                 .padding(contentPadding)
         ) {
             ScrollableTabRow(
-                selectedTabIndex = LibraryTab.entries.indexOf(state.selectedTab),
+                selectedTabIndex = visibleTabs.indexOf(state.selectedTab).coerceAtLeast(0),
                 modifier = Modifier.fillMaxWidth().testTag("library-tabs"),
                 edgePadding = 16.dp,
                 divider = {}
             ) {
-                LibraryTab.entries.forEach { tab ->
+                visibleTabs.forEach { tab ->
                     Tab(
                         selected = state.selectedTab == tab,
                         onClick = { switchTab(tab) },
@@ -499,7 +514,7 @@ fun LibraryScreen(
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
-                    libraryCategories.chunked(2).forEach { categories ->
+                    visibleCategories.chunked(2).forEach { categories ->
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -522,15 +537,17 @@ fun LibraryScreen(
                             if (categories.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
-                    state.lastVisitedTab?.let { tab ->
-                        ListItem(
-                            modifier = Modifier.clickable { switchTab(tab) },
-                            headlineContent = { Text("Last visited") },
-                            supportingContent = {
-                                Text(state.tabs[tab]?.locations?.lastOrNull()?.title ?: tab.title)
-                            }
-                        )
-                    }
+                    state.lastVisitedTab
+                        ?.takeUnless { it == LibraryTab.PLAYLISTS }
+                        ?.let { tab ->
+                            ListItem(
+                                modifier = Modifier.clickable { switchTab(tab) },
+                                headlineContent = { Text("Last visited") },
+                                supportingContent = {
+                                    Text(state.tabs[tab]?.locations?.lastOrNull()?.title ?: tab.title)
+                                }
+                            )
+                        }
                 }
             } else {
                 if (viewType != null) {
@@ -1168,8 +1185,42 @@ private fun PlayerStrip(
     }
     val controlsEnabled = !isSendingCommand
     val playback = rememberPlayerStripState(mediaPlayer, status, activePlayer.playerName)
+    val dragThreshold = with(LocalDensity.current) { 48.dp.toPx() }
+    val latestOnExpand by rememberUpdatedState(onExpand)
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var showExpandHint by remember { mutableStateOf(false) }
     Surface(
-        modifier = cardModifier,
+        modifier = cardModifier
+            .testTag("player-strip")
+            .graphicsLayer { translationY = dragOffset }
+            .pointerInput(dragThreshold) {
+                var cumulativeDrag = 0f
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        cumulativeDrag = 0f
+                        dragOffset = 0f
+                        showExpandHint = false
+                    },
+                    onDragEnd = {
+                        val shouldExpand = cumulativeDrag <= -dragThreshold
+                        cumulativeDrag = 0f
+                        dragOffset = 0f
+                        showExpandHint = false
+                        if (shouldExpand) latestOnExpand()
+                    },
+                    onDragCancel = {
+                        cumulativeDrag = 0f
+                        dragOffset = 0f
+                        showExpandHint = false
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        cumulativeDrag += dragAmount
+                        dragOffset = cumulativeDrag.coerceIn(-dragThreshold * 1.5f, 0f)
+                        showExpandHint = cumulativeDrag <= -dragThreshold
+                        change.consume()
+                    }
+                )
+            },
         shape = cardShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 4.dp,
@@ -1184,13 +1235,21 @@ private fun PlayerStrip(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                PlayerArtwork(mediaPlayer, activePlayer.connection, status, Modifier.size(48.dp))
+                PlayerArtwork(
+                    mediaPlayer,
+                    activePlayer.connection,
+                    status,
+                    Modifier.size(48.dp),
+                    onExpand
+                )
                 Spacer(Modifier.width(10.dp))
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onExpand)
+                        .pointerInput(onExpand) {
+                            detectTapGestures(onTap = { onExpand() })
+                        }
                         .padding(vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
@@ -1273,6 +1332,19 @@ private fun PlayerStrip(
                     )
                 }
             }
+            AnimatedVisibility(
+                visible = showExpandHint,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Text(
+                    "Release to open Now Playing",
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+            }
             if (playback.canSeek && playback.durationMs != null) {
                 var position by remember(playback.durationMs) {
                     mutableFloatStateOf(playback.positionMs / 1_000f)
@@ -1326,11 +1398,16 @@ private fun PlayerArtwork(
     player: Player?,
     connection: LmsServerConnection,
     status: LmsPlayerStatus?,
-    modifier: Modifier
+    modifier: Modifier,
+    onExpand: () -> Unit
 ) {
     val artworkUri = player?.currentMediaItem?.mediaMetadata?.artworkUri?.toString()
     Surface(
-        modifier = modifier.clip(RoundedCornerShape(10.dp)),
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onExpand)
+            .testTag("player-strip-artwork")
+            .semantics { contentDescription = "Open Now Playing" },
         color = MaterialTheme.colorScheme.primaryContainer
     ) {
         LmsArtworkImage(

@@ -221,17 +221,40 @@ class LibraryViewModel(
         mutableSearchText.value = searchText
         mutableRestoredScrollAnchor.value = scrollAnchor
         val restoredTabs = tabs.mapNotNull { (name, snapshot) ->
-            val tab = LibraryTab.entries.find { it.name == name && it != LibraryTab.HOME }
+            val tab = LibraryTab.entries.find {
+                it.name == name &&
+                    it != LibraryTab.HOME &&
+                    it != LibraryTab.PLAYLISTS
+            }
                 ?: return@mapNotNull null
             val locations = snapshot.locationStack.map { LibraryLocation(it.title, it.query, it.filter) }
             if (locations.getOrNull(1)?.query != tab.query) return@mapNotNull null
             tab to LibraryTabState(locations, snapshot.scrollAnchor)
         }.toMap()
-        val selected = LibraryTab.entries.find { it.name == activeTab }
-            ?: LibraryTab.entries.find { it.query != null && it.query == mutableLocationStack.value.getOrNull(1)?.query }
+        val restoredSelection = LibraryTab.entries.find { it.name == activeTab }
+            ?: LibraryTab.entries.find {
+                it.query != null && it.query == mutableLocationStack.value.getOrNull(1)?.query
+            }
             ?: LibraryTab.HOME
+        val hasPlaylistLocation = mutableLocationStack.value.any {
+            it.query == LmsLibraryQuery.PLAYLISTS ||
+                it.query == LmsLibraryQuery.PLAYLIST_TRACKS
+        }
+        val selected = if (
+            restoredSelection == LibraryTab.PLAYLISTS || hasPlaylistLocation
+        ) {
+            mutableLocationStack.value = listOf(LibraryLocation("Library"))
+            mutableRestoredScrollAnchor.value = null
+            LibraryTab.HOME
+        } else {
+            restoredSelection
+        }
         mutableSelectedTab.value = selected
-        mutableLastVisitedTab.value = LibraryTab.entries.find { it.name == lastVisitedTab && it != LibraryTab.HOME }
+        mutableLastVisitedTab.value = LibraryTab.entries.find {
+            it.name == lastVisitedTab &&
+                it != LibraryTab.HOME &&
+                it != LibraryTab.PLAYLISTS
+        }
             ?: selected.takeUnless { it == LibraryTab.HOME }
         mutableTabs.value = if (selected == LibraryTab.HOME || searchText.isNotBlank() && selected in restoredTabs) restoredTabs else {
             restoredTabs + (selected to LibraryTabState(mutableLocationStack.value, scrollAnchor))

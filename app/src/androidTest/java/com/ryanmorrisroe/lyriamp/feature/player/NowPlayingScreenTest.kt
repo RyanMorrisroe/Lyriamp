@@ -39,6 +39,49 @@ class NowPlayingScreenTest {
     val compose = createComposeRule()
 
     @Test
+    fun downSwipeDismissesFullScreenNowPlaying() {
+        val remote = FakePlayerRemoteGateway()
+        val viewModel = connectedViewModel(compose, remote)
+        var dismissals = 0
+
+        compose.setContent {
+            LyriampTheme(dynamicColor = false) {
+                NowPlayingScreen(
+                    player = null,
+                    connectionViewModel = viewModel,
+                    onBack = { dismissals++ },
+                    onChoosePlayer = {},
+                    onAddToQueue = {},
+                    onOpenQueue = {},
+                    onOpenArtist = {},
+                    onOpenAlbum = {}
+                )
+            }
+        }
+
+        compose.onNodeWithTag("now-playing-screen").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -200f), delayMillis = 400)
+            up()
+        }
+        compose.runOnIdle { assertEquals(0, dismissals) }
+
+        compose.onNodeWithTag("now-playing-dismiss-handle").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 20f), delayMillis = 100)
+            up()
+        }
+        compose.runOnIdle { assertEquals(0, dismissals) }
+
+        compose.onNodeWithTag("now-playing-dismiss-handle").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 200f), delayMillis = 400)
+            up()
+        }
+        compose.runOnIdle { assertEquals(1, dismissals) }
+    }
+
+    @Test
     fun showsCurrentPlayerAndQueueMetadataWithLibraryActions() {
         val remote = FakePlayerRemoteGateway()
         val viewModel = connectedViewModel(compose, remote)

@@ -1,5 +1,6 @@
 package com.ryanmorrisroe.lyriamp.feature.library
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.assertIsOn
@@ -92,13 +93,12 @@ class LibraryLayoutTest {
     }
 
     @Test
-    fun playlistTabRemainsReachableFromScrollableNavigation() {
+    fun playlistsAreHiddenFromLibraryNavigation() {
         showLibrary(FakeDisplayPreferences())
 
-        compose.onAllNodesWithText("Playlists").onFirst().performScrollTo().performClick()
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Playlist 0").fetchSemanticsNodes().isNotEmpty()
-        }
+        compose.onNodeWithTag("library-tabs").assertExists()
+        compose.onNodeWithText("Playlists").assertDoesNotExist()
+        compose.onAllNodesWithText("Artists").onFirst().assertExists()
     }
 
     @Test
@@ -182,13 +182,6 @@ class LibraryLayoutTest {
         }
         compose.onNodeWithContentDescription("Play Song 0").fetchSemanticsNode()
         compose.onNodeWithText("Track", useUnmergedTree = true).assertDoesNotExist()
-
-        compose.onAllNodesWithText("Playlists").onFirst().performScrollTo().performClick()
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Playlist 0").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithContentDescription("Play Playlist 0").fetchSemanticsNode()
-        compose.onNodeWithText("Playlist", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
@@ -359,6 +352,32 @@ class LibraryLayoutTest {
         }
     }
 
+    @Test
+    fun playerStripArtworkTapAndUpSwipeOpenNowPlaying() {
+        var nowPlayingOpens = 0
+        showLibrary(
+            FakeDisplayPreferences(),
+            onOpenNowPlaying = { nowPlayingOpens++ }
+        )
+
+        compose.onNodeWithContentDescription("Open Now Playing").performClick()
+        compose.runOnIdle { assertEquals(1, nowPlayingOpens) }
+
+        compose.onNodeWithTag("player-strip").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -60f), delayMillis = 100)
+            up()
+        }
+        compose.runOnIdle { assertEquals(1, nowPlayingOpens) }
+
+        compose.onNodeWithTag("player-strip").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -200f), delayMillis = 400)
+            up()
+        }
+        compose.runOnIdle { assertEquals(2, nowPlayingOpens) }
+    }
+
     private fun showLibrary(
         preferences: FakeDisplayPreferences,
         store: LmsActivePlayerStore = LmsActivePlayerStore().apply {
@@ -369,7 +388,8 @@ class LibraryLayoutTest {
             ConnectionViewModel(client, client, client, store)
         },
         searchText: String = "",
-        queuePickerMode: Boolean = false
+        queuePickerMode: Boolean = false,
+        onOpenNowPlaying: () -> Unit = {}
     ): FakeLibrary {
         val gateway = FakeLibrary()
         val library = LibraryViewModel(gateway, store)
@@ -384,7 +404,7 @@ class LibraryLayoutTest {
                     mediaPlayer = null,
                     onChangePlayer = {},
                     onOpenSettings = {},
-                    onOpenNowPlaying = {},
+                    onOpenNowPlaying = onOpenNowPlaying,
                     queuePickerMode = queuePickerMode
                 )
             }

@@ -6,6 +6,13 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -108,7 +115,17 @@ fun LyriampAppNavigation(
         )
     }
 
-    NavHost(navController = navController, startDestination = RESTORING_ROUTE) {
+    NavHost(
+        navController = navController,
+        startDestination = RESTORING_ROUTE,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
+    ) {
         composable(RESTORING_ROUTE) {
             LaunchedEffect(Unit) {
                 val snapshot = runCatching { lastSessionRepository.load() }.getOrNull()
@@ -302,7 +319,23 @@ fun LyriampAppNavigation(
                 onConnections = { navController.navigate(CONNECTIONS_ROUTE) }
             )
         }
-        composable(NOW_PLAYING_ROUTE) {
+        composable(
+            route = NOW_PLAYING_ROUTE,
+            enterTransition = {
+                slideInVertically(
+                    initialOffsetY = { fullHeight -> fullHeight },
+                    animationSpec = tween(360, easing = FastOutSlowInEasing)
+                )
+            },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = {
+                slideOutVertically(
+                    targetOffsetY = { fullHeight -> fullHeight },
+                    animationSpec = tween(360, easing = FastOutSlowInEasing)
+                )
+            }
+        ) {
             NowPlayingScreen(
                 player = mediaPlayer,
                 connectionViewModel = connectionViewModel,
