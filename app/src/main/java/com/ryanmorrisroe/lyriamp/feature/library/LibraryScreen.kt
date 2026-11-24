@@ -41,6 +41,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -103,6 +106,8 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsHttpException
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItem
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySort
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySortOrder
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
@@ -112,8 +117,10 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
 import com.ryanmorrisroe.lyriamp.data.lms.artworkSource
+import com.ryanmorrisroe.lyriamp.data.lms.supportedSortOptions
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryLayout
+import com.ryanmorrisroe.lyriamp.data.persistence.LibrarySortPreference
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
@@ -155,6 +162,7 @@ fun LibraryScreen(
         libraryCategories.filterNot { it.query == LmsLibraryQuery.PLAYLISTS }
     }
     var searchVisible by remember { mutableStateOf(false) }
+    var sortSheetVisible by remember { mutableStateOf(false) }
     val items = viewModel.items.collectAsLazyPagingItems()
     val viewType = if (state.searchText.isNotBlank()) LibraryViewType.SEARCH else when (state.location.query) {
         LmsLibraryQuery.ARTISTS -> LibraryViewType.ARTISTS
@@ -549,21 +557,41 @@ fun LibraryScreen(
                             .padding(start = 20.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (state.searchText.isBlank()) {
-                                "Browse ${state.location.title}"
-                            } else {
-                                "Search results"
-                            },
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1
-                        )
                         if (viewType != LibraryViewType.GENRES) {
                             LibraryLayoutSelector(
                                 viewType = viewType,
                                 selectedLayout = layout,
                                 onSelect = { displayPreferencesViewModel.setLayout(viewType, it) }
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        val albumTrackListing = state.location.query == LmsLibraryQuery.TRACKS &&
+                            state.location.filter.albumId != null
+                        val sortPreference = if (
+                            state.searchText.isBlank() &&
+                            viewType != LibraryViewType.GENRES &&
+                            viewType != LibraryViewType.SEARCH &&
+                            !albumTrackListing
+                        ) {
+                            displayState.preferences.sortFor(viewType)
+                        } else {
+                            null
+                        }
+                        if (sortPreference != null) {
+                            LibrarySortChip(
+                                preference = sortPreference,
+                                onClick = { sortSheetVisible = true }
+                            )
+                        }
+                        if (sortSheetVisible && sortPreference != null) {
+                            val sortOptions = state.location.query?.supportedSortOptions().orEmpty()
+                            LibrarySortSheet(
+                                preference = sortPreference,
+                                options = sortOptions,
+                                onPreferenceChange = { preference ->
+                                    displayPreferencesViewModel.setSort(viewType, preference)
+                                },
+                                onDismiss = { sortSheetVisible = false }
                             )
                         }
                     }
@@ -1082,6 +1110,204 @@ private fun LibraryLayout.displayName(): String = when (this) {
     LibraryLayout.COVER_WALL -> "Cover wall"
     LibraryLayout.COMPACT -> "Compact"
     LibraryLayout.COMFORTABLE -> "Comfortable"
+}
+
+private fun LmsLibrarySort.displayName(): String = when (this) {
+    LmsLibrarySort.ARTIST -> "Name"
+    LmsLibrarySort.NEW -> "Recently Added"
+    LmsLibrarySort.PLAY_COUNT -> "Play Count"
+    LmsLibrarySort.POPULAR -> "Popular"
+    LmsLibrarySort.RECENTLY_PLAYED -> "Recently Played"
+    LmsLibrarySort.ALBUM -> "Album"
+    LmsLibrarySort.ARTIST_ALBUM -> "Artist/Album"
+    LmsLibrarySort.YEAR_ALBUM -> "Year/Album"
+    LmsLibrarySort.YEAR_ARTIST_ALBUM -> "Artist/Year/Album"
+    LmsLibrarySort.ART_FLOW -> "Artwork Flow"
+    LmsLibrarySort.CHANGED -> "Changed"
+    LmsLibrarySort.RANDOM -> "Random"
+    LmsLibrarySort.TITLE -> "Title"
+    LmsLibrarySort.TRACK_NUMBER -> "Track Number"
+    LmsLibrarySort.ALBUM_TRACK -> "Album/Track"
+}
+
+private fun LmsLibrarySortOrder.displayName(): String = when (this) {
+    LmsLibrarySortOrder.ASCENDING -> "Ascending"
+    LmsLibrarySortOrder.DESCENDING -> "Descending"
+}
+
+@Composable
+private fun LibrarySortChip(
+    preference: LibrarySortPreference,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(12.dp)
+    val ascending = preference.order == LmsLibrarySortOrder.ASCENDING
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .height(40.dp)
+            .testTag("library-sort-chip"),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SortDirectionGlyph(
+                ascending = ascending,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = preference.sort.displayName(),
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun SortDirectionGlyph(
+    ascending: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier.semantics {
+            contentDescription = if (ascending) "Ascending" else "Descending"
+        }
+    ) {
+        val stroke = 1.8.dp.toPx()
+        val x = size.width / 2f
+        val startY = if (ascending) size.height * 0.82f else size.height * 0.18f
+        val endY = if (ascending) size.height * 0.18f else size.height * 0.82f
+        drawLine(
+            color = color,
+            start = Offset(x, startY),
+            end = Offset(x, endY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        val tipOffset = size.width * 0.22f
+        val headY = if (ascending) size.height * 0.18f else size.height * 0.82f
+        val headOuterY = if (ascending) size.height * 0.38f else size.height * 0.62f
+        drawLine(
+            color = color,
+            start = Offset(x, headY),
+            end = Offset(x - tipOffset, headOuterY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(x, headY),
+            end = Offset(x + tipOffset, headOuterY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun LibrarySortSheet(
+    preference: LibrarySortPreference,
+    options: List<LmsLibrarySort>,
+    onPreferenceChange: (LibrarySortPreference) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text("Sort library", style = MaterialTheme.typography.titleLarge)
+            LibrarySortDropdown(
+                label = "Sort By",
+                value = preference.sort.displayName(),
+                options = options.map { it.displayName() },
+                testTagName = "library-sort-by",
+                onSelected = { label ->
+                    options.firstOrNull { it.displayName() == label }?.let { sort ->
+                        onPreferenceChange(preference.copy(sort = sort))
+                    }
+                }
+            )
+            LibrarySortDropdown(
+                label = "Order",
+                value = preference.order.displayName(),
+                options = LmsLibrarySortOrder.entries.map { it.displayName() },
+                testTagName = "library-sort-order",
+                enabled = preference.sort != LmsLibrarySort.RANDOM,
+                onSelected = { label ->
+                    LmsLibrarySortOrder.entries
+                        .firstOrNull { it.displayName() == label }
+                        ?.let { order ->
+                            onPreferenceChange(preference.copy(order = order))
+                        }
+                }
+            )
+            Text(
+                text = "Changes take effect instantly",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun LibrarySortDropdown(
+    label: String,
+    value: String,
+    options: List<String>,
+    testTagName: String,
+    enabled: Boolean = true,
+    onSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = enabled && it },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled)
+                .testTag(testTagName)
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        expanded = false
+                        onSelected(option)
+                    }
+                )
+            }
+        }
+    }
 }
 
 @Composable

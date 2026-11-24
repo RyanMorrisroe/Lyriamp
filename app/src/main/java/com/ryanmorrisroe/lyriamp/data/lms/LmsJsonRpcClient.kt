@@ -119,10 +119,11 @@ class LmsJsonRpcClient(
         offset: Int,
         limit: Int,
         filter: LmsLibraryFilter,
-        search: String?
+        search: String?,
+        sort: LmsLibrarySort?
     ): LmsLibraryPage {
         validateLibraryPage(offset, limit)
-        val result = request(connection, "", libraryPageCommand(query, offset, limit, filter, search))
+        val result = request(connection, "", libraryPageCommand(query, offset, limit, filter, search, sort))
         val totalCount = result["count"].asInt()
             ?: throw LmsProtocolException("LMS response did not include a library result count.")
         return LmsLibraryPage(
@@ -610,7 +611,8 @@ class LmsJsonRpcClient(
         offset: Int,
         limit: Int,
         filter: LmsLibraryFilter,
-        search: String?
+        search: String?,
+        sort: LmsLibrarySort? = null
     ) = buildJsonArray {
         query.command.forEach { add(JsonPrimitive(it)) }
         add(JsonPrimitive(offset))
@@ -628,6 +630,8 @@ class LmsJsonRpcClient(
         }
         if (query == LmsLibraryQuery.TRACKS && filter.albumId != null) {
             add(JsonPrimitive("sort:albumtrack"))
+        } else if (sort != null) {
+            add(JsonPrimitive("sort:${sort.lmsKey}"))
         }
         filter.toQueryParameters().forEach { add(JsonPrimitive(it)) }
         search?.takeIf(String::isNotBlank)?.let { add(JsonPrimitive("search:$it")) }

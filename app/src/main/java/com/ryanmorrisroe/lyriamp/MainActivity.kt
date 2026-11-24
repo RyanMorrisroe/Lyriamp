@@ -44,7 +44,11 @@ class MainActivity : ComponentActivity() {
 
     private val libraryViewModel: LibraryViewModel by viewModels {
         val app = application as LyriampApplication
-        LibraryViewModel.Factory(app.libraryGateway, app.activePlayerStore)
+        LibraryViewModel.Factory(
+            app.libraryGateway,
+            app.activePlayerStore,
+            app.displayPreferencesRepository
+        )
     }
     private val displayPreferencesViewModel: DisplayPreferencesViewModel by viewModels {
         DisplayPreferencesViewModel.Factory(

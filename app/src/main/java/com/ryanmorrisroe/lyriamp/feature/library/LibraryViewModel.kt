@@ -18,12 +18,17 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryPage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySearchResults
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySort
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySortOrder
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.isLmsArtworkId
 import com.ryanmorrisroe.lyriamp.data.lms.sortedForAlbumTracks
+import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferencesRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionTabSnapshot
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionLocation
+import com.ryanmorrisroe.lyriamp.data.persistence.LibrarySortPreference
+import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -50,6 +55,31 @@ data class LibraryCategory(
     val title: String,
     val query: LmsLibraryQuery
 )
+
+private fun sortPreferenceFor(
+    location: LibraryLocation,
+    searchText: String,
+    preferences: Map<LibraryViewType, LibrarySortPreference>
+): LibrarySortPreference? {
+    if (searchText.isNotBlank()) return null
+    val type = when (location.query) {
+        LmsLibraryQuery.ARTISTS -> LibraryViewType.ARTISTS
+        LmsLibraryQuery.ALBUMS -> LibraryViewType.ALBUMS
+        LmsLibraryQuery.GENRES -> LibraryViewType.GENRES
+        LmsLibraryQuery.TRACKS,
+        LmsLibraryQuery.PLAYLIST_TRACKS -> LibraryViewType.SONGS
+        LmsLibraryQuery.PLAYLISTS,
+        null -> null
+    } ?: return null
+    return preferences[type] ?: when (type) {
+        LibraryViewType.ARTISTS -> LibrarySortPreference(LmsLibrarySort.ARTIST)
+        LibraryViewType.ALBUMS -> LibrarySortPreference(LmsLibrarySort.ALBUM)
+        LibraryViewType.SONGS -> LibrarySortPreference(LmsLibrarySort.TITLE)
+        LibraryViewType.GENRES,
+        LibraryViewType.PLAYLISTS,
+        LibraryViewType.SEARCH -> null
+    }
+}
 
 private data class ArtistArtworkCacheKey(
     val serverUrl: String,
@@ -101,7 +131,8 @@ val libraryCategories = listOf(
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class LibraryViewModel(
     private val libraryGateway: LmsLibraryGateway,
-    private val activePlayerStore: LmsActivePlayerStore
+    private val activePlayerStore: LmsActivePlayerStore,
+    private val displayPreferencesRepository: DisplayPreferencesRepository? = null
 ) : ViewModel() {
     private val mutableLocationStack = MutableStateFlow(listOf(LibraryLocation("Library")))
     private val mutableSearchText = MutableStateFlow("")
@@ -112,11 +143,28 @@ class LibraryViewModel(
     private val mutableSelectedTab = MutableStateFlow(LibraryTab.HOME)
     private val mutableLastVisitedTab = MutableStateFlow<LibraryTab?>(null)
     private val mutableTabs = MutableStateFlow<Map<LibraryTab, LibraryTabState>>(emptyMap())
+    private val mutableSortPreferences =
+        MutableStateFlow<Map<LibraryViewType, LibrarySortPreference>>(emptyMap())
     private val artistArtworkCache = LinkedHashMap<ArtistArtworkCacheKey, String>(
         MAX_CACHED_ARTIST_ARTWORK,
         0.75f,
         true
     )
+    init {
+        displayPreferencesRepository?.let { repository ->
+            viewModelScope.launch {
+                try {
+                    repository.observe().collect { preferences ->
+                        mutableSortPreferences.value = preferences.sorts
+                    }
+                } catch (exception: CancellationException) {
+                    throw exception
+                } catch (_: Exception) {
+                    mutableSortPreferences.value = emptyMap()
+                }
+            }
+        }
+    }
     private val tabState = combine(mutableSelectedTab, mutableLastVisitedTab, mutableTabs) { selected, last, tabs ->
         Triple(selected, last, tabs)
     }
@@ -162,8 +210,9 @@ class LibraryViewModel(
         mutableLocationStack,
         debouncedSearch,
         activePlayerStore.activePlayer,
-        mutableRestoredScrollAnchor
-    ) { locationStack, searchTerm, activePlayer, anchor ->
+        mutableRestoredScrollAnchor,
+        mutableSortPreferences
+    ) { locationStack, searchTerm, activePlayer, anchor, sortPreferences ->
         val locationKey = libraryLocationKey(locationStack)
         val matchingAnchor = anchor?.takeIf {
             it.locationKey == locationKey && it.searchText == searchTerm
@@ -172,7 +221,8 @@ class LibraryViewModel(
             locationStack.last(),
             searchTerm,
             activePlayer,
-            matchingAnchor?.index
+            matchingAnchor?.index,
+            sortPreferenceFor(locationStack.last(), searchTerm, sortPreferences)
         )
     }.flatMapLatest { request ->
         val player = request.activePlayer
@@ -197,7 +247,8 @@ class LibraryViewModel(
                             libraryGateway,
                             player,
                             query,
-                            request.location.filter
+                            request.location.filter,
+                            request.sortPreference
                         )
                     }.flow
                 }
@@ -525,14 +576,19 @@ class LibraryViewModel(
 
     class Factory(
         private val libraryGateway: LmsLibraryGateway,
-        private val activePlayerStore: LmsActivePlayerStore
+        private val activePlayerStore: LmsActivePlayerStore,
+        private val displayPreferencesRepository: DisplayPreferencesRepository? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (!modelClass.isAssignableFrom(LibraryViewModel::class.java)) {
                 throw IllegalArgumentException("Unsupported ViewModel: ${modelClass.name}")
             }
-            return LibraryViewModel(libraryGateway, activePlayerStore) as T
+            return LibraryViewModel(
+                libraryGateway,
+                activePlayerStore,
+                displayPreferencesRepository
+            ) as T
         }
     }
 
@@ -540,7 +596,8 @@ class LibraryViewModel(
         val location: LibraryLocation,
         val searchTerm: String,
         val activePlayer: LmsActivePlayer?,
-        val initialKey: Int?
+        val initialKey: Int?,
+        val sortPreference: LibrarySortPreference?
     )
 
     private companion object {
@@ -623,24 +680,87 @@ internal class LmsLibraryPagingSource(
     private val gateway: LmsLibraryGateway,
     private val activePlayer: LmsActivePlayer,
     private val query: LmsLibraryQuery,
-    private val filter: LmsLibraryFilter
+    private val filter: LmsLibraryFilter,
+    private val sortPreference: LibrarySortPreference? = null
 ) : PagingSource<Int, LmsLibraryItem>() {
+    private var cachedTotalCount: Int? = null
     override val jumpingSupported: Boolean = true
 
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, LmsLibraryItem> = try {
         var offset = params.key ?: 0
         val limit = params.loadSize.coerceIn(1, MAX_PAGE_SIZE)
+        val sort = sortPreference?.sort
+        val reverseServerResults = if (
+            sort != null &&
+            sortPreference.order == LmsLibrarySortOrder.DESCENDING
+        ) {
+            !sort.naturallyDescending
+        } else if (
+            sort != null &&
+            sortPreference.order == LmsLibrarySortOrder.ASCENDING
+        ) {
+            sort.naturallyDescending
+        } else {
+            false
+        }
+        if (reverseServerResults) {
+            val totalCount = cachedTotalCount ?: gateway.getPage(
+                activePlayer.connection,
+                query,
+                0,
+                1,
+                filter,
+                sort = sort
+            ).totalCount
+            cachedTotalCount = totalCount
+            offset = offset.coerceIn(0, totalCount)
+            val displayLimit = limit.coerceAtMost(totalCount - offset)
+            val serverOffset = (totalCount - offset - displayLimit).coerceAtLeast(0)
+            val serverLimit = displayLimit.coerceAtLeast(0)
+            val page = if (serverLimit == 0) {
+                LmsLibraryPage(emptyList(), serverOffset, totalCount)
+            } else {
+                gateway.getPage(
+                    activePlayer.connection,
+                    query,
+                    serverOffset,
+                    serverLimit,
+                    filter,
+                    sort = sort
+                )
+            }
+            val items = page.items.asReversed()
+            return LoadResult.Page(
+                data = items,
+                prevKey = if (offset == 0) null else (offset - limit).coerceAtLeast(0),
+                nextKey = if (items.isEmpty() || offset + items.size >= totalCount) {
+                    null
+                } else {
+                    offset + items.size
+                },
+                itemsBefore = offset,
+                itemsAfter = (totalCount - offset - items.size).coerceAtLeast(0)
+            )
+        }
         var page = gateway.getPage(
             activePlayer.connection,
             query,
             offset,
             limit,
-            filter
+            filter,
+            sort = sort
         )
         if (offset > 0 && offset >= page.totalCount) {
             offset = (page.totalCount - 1).coerceAtLeast(0)
             if (page.totalCount > 0) {
-                page = gateway.getPage(activePlayer.connection, query, offset, limit, filter)
+                page = gateway.getPage(
+                    activePlayer.connection,
+                    query,
+                    offset,
+                    limit,
+                    filter,
+                    sort = sort
+                )
             }
         }
         LoadResult.Page(

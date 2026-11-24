@@ -217,6 +217,37 @@ class LmsJsonRpcClientTest {
     }
 
     @Test
+    fun requestsSelectedAlbumSortMode() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """{"id":1,"result":{"count":1,"albums_loop":[
+                    {"id":42,"album":"Blue Train","artist":"John Coltrane"}
+                ]}}"""
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.ALBUMS,
+                offset = 0,
+                limit = 30,
+                sort = LmsLibrarySort.YEAR_ALBUM
+            )
+
+            assertEquals(1, page.totalCount)
+            assertEquals(
+                listOf("albums", "0", "30", "tags:aljKy", "sort:yearalbum"),
+                capturedCommand(capturedRequest)
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun requestsAlbumArtistPortraitsForArtistPages() = runBlocking {
         var capturedRequest: HttpRequestData? = null
         val client = HttpClient(MockEngine { request ->
