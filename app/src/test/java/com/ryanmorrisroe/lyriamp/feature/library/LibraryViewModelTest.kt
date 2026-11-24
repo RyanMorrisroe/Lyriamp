@@ -194,6 +194,32 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun restoreSessionReturnsToHomeWhenPlaylistBrowseWasSaved() {
+        runLibraryViewModelTest {
+            val viewModel = LibraryViewModel(FakeLibraryGateway(), LmsActivePlayerStore())
+
+            viewModel.restoreSession(
+                locationStack = listOf(
+                    LibraryLocation("Library"),
+                    LibraryLocation("Playlists", LmsLibraryQuery.PLAYLISTS)
+                ),
+                searchText = "",
+                scrollAnchor = null,
+                activeTab = LibraryTab.PLAYLISTS.name,
+                lastVisitedTab = LibraryTab.PLAYLISTS.name
+            )
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(LibraryLocation("Library")),
+                viewModel.uiState.value.locationStack
+            )
+            assertEquals(LibraryTab.HOME, viewModel.currentTab())
+            assertEquals(null, viewModel.lastVisitedTab())
+        }
+    }
+
+    @Test
     fun restoreSessionAddsLibraryRootAndResetClearsBrowseState() {
         runLibraryViewModelTest {
             val viewModel = LibraryViewModel(FakeLibraryGateway(), LmsActivePlayerStore())

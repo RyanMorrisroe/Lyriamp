@@ -93,13 +93,12 @@ class LibraryLayoutTest {
     }
 
     @Test
-    fun playlistTabRemainsReachableFromScrollableNavigation() {
+    fun playlistsAreHiddenFromLibraryNavigation() {
         showLibrary(FakeDisplayPreferences())
 
-        compose.onAllNodesWithText("Playlists").onFirst().performScrollTo().performClick()
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Playlist 0").fetchSemanticsNodes().isNotEmpty()
-        }
+        compose.onNodeWithTag("library-tabs").assertExists()
+        compose.onNodeWithText("Playlists").assertDoesNotExist()
+        compose.onAllNodesWithText("Artists").onFirst().assertExists()
     }
 
     @Test
@@ -183,13 +182,6 @@ class LibraryLayoutTest {
         }
         compose.onNodeWithContentDescription("Play Song 0").fetchSemanticsNode()
         compose.onNodeWithText("Track", useUnmergedTree = true).assertDoesNotExist()
-
-        compose.onAllNodesWithText("Playlists").onFirst().performScrollTo().performClick()
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("Playlist 0").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithContentDescription("Play Playlist 0").fetchSemanticsNode()
-        compose.onNodeWithText("Playlist", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test

@@ -148,6 +148,12 @@ fun LibraryScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val connectionState by connectionViewModel.uiState.collectAsStateWithLifecycle()
     val displayState by displayPreferencesViewModel.state.collectAsStateWithLifecycle()
+    val visibleTabs = remember {
+        LibraryTab.entries.filterNot { it == LibraryTab.PLAYLISTS }
+    }
+    val visibleCategories = remember {
+        libraryCategories.filterNot { it.query == LmsLibraryQuery.PLAYLISTS }
+    }
     var searchVisible by remember { mutableStateOf(false) }
     var actionsExpanded by remember { mutableStateOf(false) }
     val items = viewModel.items.collectAsLazyPagingItems()
@@ -384,12 +390,12 @@ fun LibraryScreen(
                 .padding(contentPadding)
         ) {
             ScrollableTabRow(
-                selectedTabIndex = LibraryTab.entries.indexOf(state.selectedTab),
+                selectedTabIndex = visibleTabs.indexOf(state.selectedTab).coerceAtLeast(0),
                 modifier = Modifier.fillMaxWidth().testTag("library-tabs"),
                 edgePadding = 16.dp,
                 divider = {}
             ) {
-                LibraryTab.entries.forEach { tab ->
+                visibleTabs.forEach { tab ->
                     Tab(
                         selected = state.selectedTab == tab,
                         onClick = { switchTab(tab) },
@@ -508,7 +514,7 @@ fun LibraryScreen(
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
-                    libraryCategories.chunked(2).forEach { categories ->
+                    visibleCategories.chunked(2).forEach { categories ->
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -531,15 +537,17 @@ fun LibraryScreen(
                             if (categories.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
-                    state.lastVisitedTab?.let { tab ->
-                        ListItem(
-                            modifier = Modifier.clickable { switchTab(tab) },
-                            headlineContent = { Text("Last visited") },
-                            supportingContent = {
-                                Text(state.tabs[tab]?.locations?.lastOrNull()?.title ?: tab.title)
-                            }
-                        )
-                    }
+                    state.lastVisitedTab
+                        ?.takeUnless { it == LibraryTab.PLAYLISTS }
+                        ?.let { tab ->
+                            ListItem(
+                                modifier = Modifier.clickable { switchTab(tab) },
+                                headlineContent = { Text("Last visited") },
+                                supportingContent = {
+                                    Text(state.tabs[tab]?.locations?.lastOrNull()?.title ?: tab.title)
+                                }
+                            )
+                        }
                 }
             } else {
                 if (viewType != null) {
