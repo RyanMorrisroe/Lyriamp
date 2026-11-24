@@ -155,7 +155,6 @@ fun LibraryScreen(
         libraryCategories.filterNot { it.query == LmsLibraryQuery.PLAYLISTS }
     }
     var searchVisible by remember { mutableStateOf(false) }
-    var actionsExpanded by remember { mutableStateOf(false) }
     val items = viewModel.items.collectAsLazyPagingItems()
     val viewType = if (state.searchText.isNotBlank()) LibraryViewType.SEARCH else when (state.location.query) {
         LmsLibraryQuery.ARTISTS -> LibraryViewType.ARTISTS
@@ -335,36 +334,29 @@ fun LibraryScreen(
                             )
                         }
                     }
-                    if (!queuePickerMode) Box {
+                    if (!queuePickerMode) {
                         IconButton(
-                            onClick = { actionsExpanded = true },
+                            onClick = onChangePlayer,
                             modifier = Modifier.semantics {
-                                contentDescription = "More actions"
+                                contentDescription = "Change players"
                             }
                         ) {
                             LibraryGlyphIcon(
-                                LibraryGlyph.MORE,
+                                LibraryGlyph.SPEAKER,
                                 MaterialTheme.colorScheme.onSurface,
                                 Modifier.size(24.dp)
                             )
                         }
-                        DropdownMenu(
-                            expanded = actionsExpanded,
-                            onDismissRequest = { actionsExpanded = false }
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Settings"
+                            }
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("Players") },
-                                onClick = {
-                                    actionsExpanded = false
-                                    onChangePlayer()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Settings") },
-                                onClick = {
-                                    actionsExpanded = false
-                                    onOpenSettings()
-                                }
+                            LibraryGlyphIcon(
+                                LibraryGlyph.SETTINGS,
+                                MaterialTheme.colorScheme.onSurface,
+                                Modifier.size(24.dp)
                             )
                         }
                     }
@@ -1154,13 +1146,14 @@ private enum class LibraryGlyph {
     COMPACT,
     COMFORTABLE,
     COVER_WALL,
-    MORE,
     NEXT,
     PAUSE,
     PLAY,
     PREVIOUS,
     SEARCH,
-    MUSIC
+    MUSIC,
+    SPEAKER,
+    SETTINGS
 }
 
 @Composable
@@ -1222,9 +1215,6 @@ private fun LibraryGlyphIcon(
                     }
                 }
             }
-            LibraryGlyph.MORE -> for (x in listOf(5f, 12f, 19f)) {
-                drawCircle(color, 1.8f * unit, Offset(x * unit, 12f * unit))
-            }
             LibraryGlyph.NEXT -> {
                 triangle(Offset(5f, 5f), Offset(15f, 12f), Offset(5f, 19f))
                 rect(18f, 5f, 2f, 14f)
@@ -1252,6 +1242,45 @@ private fun LibraryGlyphIcon(
                 line(14f, 4f, 21f, 3f)
                 drawCircle(color, 3.5f * unit, Offset(10f * unit, 18f * unit))
                 drawCircle(color, 3.5f * unit, Offset(17f * unit, 16f * unit))
+            }
+            LibraryGlyph.SPEAKER -> {
+                line(5f, 2f, 19f, 2f)
+                line(19f, 2f, 19f, 22f)
+                line(19f, 22f, 5f, 22f)
+                line(5f, 22f, 5f, 2f)
+                drawCircle(
+                    color = color,
+                    radius = 4f * unit,
+                    center = Offset(12f * unit, 16f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
+                drawCircle(
+                    color = color,
+                    radius = 2f * unit,
+                    center = Offset(12f * unit, 7f * unit)
+                )
+            }
+            LibraryGlyph.SETTINGS -> {
+                rect(10f, 2f, 4f, 4f)
+                rect(10f, 18f, 4f, 4f)
+                rect(2f, 10f, 4f, 4f)
+                rect(18f, 10f, 4f, 4f)
+                rect(4f, 4f, 4f, 4f)
+                rect(16f, 4f, 4f, 4f)
+                rect(4f, 16f, 4f, 4f)
+                rect(16f, 16f, 4f, 4f)
+                drawCircle(
+                    color = color,
+                    radius = 7f * unit,
+                    center = Offset(12f * unit, 12f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
+                drawCircle(
+                    color = color,
+                    radius = 3f * unit,
+                    center = Offset(12f * unit, 12f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
             }
         }
     }

@@ -148,8 +148,24 @@ fun NowPlayingScreen(
                         }
                     },
                     actions = {
-                        TextButton(onClick = onChoosePlayer) {
-                            Text(currentPlayerName ?: "Players", maxLines = 1)
+                        TextButton(
+                            onClick = onChoosePlayer,
+                            modifier = Modifier.semantics {
+                                contentDescription =
+                                    "Change player, ${currentPlayerName ?: "Players"}"
+                            }
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                PlayerGlyphIcon(
+                                    PlayerGlyph.SPEAKER,
+                                    MaterialTheme.colorScheme.onSurface,
+                                    Modifier.size(24.dp)
+                                )
+                                Text(currentPlayerName ?: "Players", maxLines = 1)
+                            }
                         }
                     }
                 )
@@ -849,6 +865,7 @@ private enum class PlayerGlyph {
     REPEAT,
     REPEAT_ONE,
     SHUFFLE,
+    SPEAKER,
     DRAG_HANDLE
 }
 
@@ -964,6 +981,23 @@ private fun PlayerGlyphIcon(
                 ))
                 line(18f, 4f, 21f, 7f)
                 line(18f, 10f, 21f, 7f)
+            }
+            PlayerGlyph.SPEAKER -> {
+                line(5f, 2f, 19f, 2f)
+                line(19f, 2f, 19f, 22f)
+                line(19f, 22f, 5f, 22f)
+                line(5f, 22f, 5f, 2f)
+                drawCircle(
+                    color = color,
+                    radius = 4f * unit,
+                    center = Offset(12f * unit, 16f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
+                drawCircle(
+                    color = color,
+                    radius = 2f * unit,
+                    center = Offset(12f * unit, 7f * unit)
+                )
             }
             PlayerGlyph.DRAG_HANDLE -> {
                 for (x in listOf(8f, 16f)) {
