@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lyriamp - Personalized Home mock</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #0f1014;
+      --panel: #17181e;
+      --raised: #202127;
+      --soft: #1b1c22;
+      --line: #34353e;
+      --strong-line: #4a4b58;
+      --text: #f4f3f7;
+      --muted: #aaaab5;
+      --subtle: #7f808b;
+      --accent: #c6aa84;
+      --accent-soft: #30291f;
+      --green: #92b3a4;
+      --rose: #c6a2a7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 18% 0%, #24232b 0, transparent 29rem), var(--page);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    button, input { font: inherit; }
+
+    .page {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 42px 28px 72px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 8px 0;
+      max-width: 900px;
+      font-size: clamp(32px, 4vw, 48px);
+      letter-spacing: -.045em;
+    }
+
+    .intro {
+      max-width: 860px;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .note {
+      display: inline-flex;
+      margin: 16px 0 28px;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #15161b;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mock-grid {
+      display: grid;
+      grid-template-columns: 390px 390px 390px;
+      gap: 28px;
+      align-items: start;
+    }
+
+    .concept-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 9px;
+      margin-bottom: 7px;
+    }
+
+    .concept-heading span {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .concept-heading h2 {
+      margin: 0;
+      font-size: 19px;
+      letter-spacing: -.03em;
+    }
+
+    .description {
+      min-height: 52px;
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .phone {
+      position: relative;
+      width: 390px;
+      height: 820px;
+      overflow: hidden;
+      border: 1px solid var(--strong-line);
+      border-radius: 34px;
+      background: var(--panel);
+      box-shadow: 0 20px 54px #0008, inset 0 0 0 4px #1d1e24;
+    }
+
+    .status {
+      height: 38px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      padding: 0 21px 5px;
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .top {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+    }
+
+    .top h3 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -.035em;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .top-action {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--text);
+      font-size: 17px;
+    }
+
+    .top-action.settings {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .tabs {
+      height: 43px;
+      display: flex;
+      align-items: stretch;
+      gap: 21px;
+      overflow: hidden;
+      border-bottom: 1px solid var(--line);
+      padding: 0 16px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tab {
+      display: flex;
+      align-items: center;
+      border-bottom: 2px solid transparent;
+    }
+
+    .tab.active {
+      border-bottom-color: var(--accent);
+      color: var(--text);
+    }
+
+    .screen {
+      height: 610px;
+      overflow: hidden;
+    }
+
+    .home-screen {
+      overflow-y: hidden;
+    }
+
+    .home-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      padding: 16px 16px 10px;
+    }
+
+    .eyebrow-small {
+      color: var(--accent);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .home-header h4 {
+      margin: 4px 0 0;
+      font-size: 24px;
+      letter-spacing: -.04em;
+    }
+
+    .customize-button {
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0 11px;
+      background: var(--soft);
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .section-heading {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 2px 16px 7px;
+    }
+
+    .section-heading strong {
+      font-size: 12px;
+    }
+
+    .section-heading span {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .pin-rail {
+      display: grid;
+      grid-template-columns: repeat(4, 86px);
+      gap: 8px;
+      margin: 0 16px;
+    }
+
+    .pin-card {
+      height: 118px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--raised);
+    }
+
+    .pin-art {
+      height: 78px;
+      position: relative;
+      background: linear-gradient(145deg, #b77a64 0 38%, #4a5c60 39% 66%, #242936 67%);
+    }
+
+    .pin-card:nth-child(2) .pin-art {
+      background: radial-gradient(circle at 50% 45%, #d9bd95 0 10%, transparent 11%), linear-gradient(145deg, #626f62, #242936);
+    }
+
+    .pin-card:nth-child(3) .pin-art {
+      background: linear-gradient(135deg, #5a4b65 0 34%, #c09c79 35% 42%, #313847 43%);
+    }
+
+    .pin-card:nth-child(4) .pin-art {
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #3a3034, #1d2328);
+      color: var(--rose);
+      font-size: 22px;
+    }
+
+    .pin-card.special .pin-art {
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #31403c, #1d2328);
+      color: #b7cbbf;
+      font-size: 20px;
+    }
+
+    .pin-art::after {
+      content: "";
+      position: absolute;
+      inset: 8px;
+      border: 1px solid #ffffff24;
+    }
+
+    .pin-card:nth-child(4) .pin-art::after { display: none; }
+
+    .pin-name {
+      height: 38px;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 9px;
+      font-weight: 800;
+      line-height: 1.15;
+    }
+
+    .strip {
+      margin-top: 9px;
+    }
+
+    .strip-row {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: 112px;
+      gap: 8px;
+      overflow: hidden;
+      margin: 0 16px;
+    }
+
+    .strip-item {
+      min-width: 0;
+    }
+
+    .strip-cover {
+      height: 112px;
+      border-radius: 11px;
+      background: linear-gradient(145deg, #8d6a5b 0 32%, #3d5361 33% 62%, #25262f 63%);
+      box-shadow: inset 0 0 0 1px #ffffff12;
+    }
+
+    .strip-item:nth-child(2) .strip-cover {
+      background: radial-gradient(circle at 65% 35%, #d8bc8d 0 11%, transparent 12%), linear-gradient(145deg, #5d6f70, #242936);
+    }
+
+    .strip-item:nth-child(3) .strip-cover {
+      background: linear-gradient(135deg, #765e63 0 30%, #c5ad91 31% 48%, #4b5559 49%);
+    }
+
+    .strip-name {
+      display: block;
+      margin-top: 6px;
+      overflow: hidden;
+      font-size: 10px;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .strip-detail {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .strip.compact .strip-row {
+      grid-auto-columns: 218px;
+    }
+
+    .strip.compact .strip-item {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 6px;
+      background: var(--soft);
+    }
+
+    .strip.compact .strip-cover {
+      height: 48px;
+    }
+
+    .strip.compact .strip-name,
+    .strip.compact .strip-detail {
+      margin: 0;
+    }
+
+    .strip.compact .strip-detail {
+      margin-top: 3px;
+    }
+
+    .settings-screen {
+      background: #121319;
+    }
+
+    .settings-header {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+      padding: 0 12px;
+    }
+
+    .back {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 21px;
+    }
+
+    .settings-header h4 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .settings-scroll {
+      height: 556px;
+      overflow: hidden;
+      padding: 10px 12px 0;
+    }
+
+    .settings-title {
+      margin: 4px 4px 10px;
+    }
+
+    .settings-title strong {
+      display: block;
+      font-size: 18px;
+    }
+
+    .settings-title span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .settings-card {
+      margin-bottom: 9px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+    }
+
+    .settings-card-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 12px 8px;
+    }
+
+    .settings-card-heading strong {
+      font-size: 11px;
+    }
+
+    .text-button {
+      border: 0;
+      background: transparent;
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .pin-editor {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+      padding: 0 12px 12px;
+    }
+
+    .pin-editor-item {
+      position: relative;
+      height: 82px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--raised);
+    }
+
+    .pin-editor-item .mini-art {
+      height: 52px;
+      background: linear-gradient(145deg, #806554, #3d4c55);
+    }
+
+    .pin-editor-item:nth-child(2) .mini-art {
+      background: radial-gradient(circle at 50% 45%, #d9bd95 0 12%, transparent 13%), #596b63;
+    }
+
+    .pin-editor-item:nth-child(3) .mini-art {
+      background: linear-gradient(135deg, #554761, #c09c79);
+    }
+
+    .pin-editor-item.special .mini-art {
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #31403c, #1d2328);
+      color: #b7cbbf;
+      font-size: 16px;
+    }
+
+    .pin-editor-item span {
+      display: block;
+      padding: 5px 6px;
+      overflow: hidden;
+      font-size: 8px;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .remove {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 18px;
+      height: 18px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #17181ed9;
+      color: var(--text);
+      font-size: 10px;
+    }
+
+    .add-pin {
+      height: 82px;
+      display: grid;
+      place-items: center;
+      border: 1px dashed var(--strong-line);
+      border-radius: 10px;
+      color: var(--accent);
+      background: var(--soft);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .section-row {
+      height: 52px;
+      display: grid;
+      grid-template-columns: 18px 34px 1fr 36px 18px;
+      align-items: center;
+      gap: 7px;
+      border-top: 1px solid var(--line);
+      padding: 0 10px;
+    }
+
+    .section-row:first-of-type {
+      border-top: 0;
+    }
+
+    .drag {
+      color: var(--subtle);
+      font-size: 12px;
+      letter-spacing: 1px;
+    }
+
+    .section-icon {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      background: var(--raised);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .section-name strong,
+    .section-name small {
+      display: block;
+    }
+
+    .section-name strong {
+      font-size: 10px;
+    }
+
+    .section-name small {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 8px;
+    }
+
+    .toggle {
+      width: 34px;
+      height: 20px;
+      border-radius: 999px;
+      padding: 2px;
+      background: #4b4c55;
+    }
+
+    .toggle.on {
+      background: #8c7558;
+    }
+
+    .toggle::after {
+      content: "";
+      display: block;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #f4f1eb;
+      transform: translateX(0);
+    }
+
+    .toggle.on::after {
+      transform: translateX(14px);
+    }
+
+    .chevron {
+      color: var(--subtle);
+      text-align: right;
+      font-size: 16px;
+    }
+
+    .density {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+      padding: 0 12px 12px;
+    }
+
+    .density-option {
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--muted);
+      background: var(--soft);
+      font-size: 9px;
+      font-weight: 800;
+    }
+
+    .density-option.active {
+      border-color: #9d886b;
+      color: var(--text);
+      background: var(--accent-soft);
+    }
+
+    .sheet {
+      position: absolute;
+      z-index: 4;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 460px;
+      border-top: 1px solid var(--strong-line);
+      border-radius: 24px 24px 0 0;
+      background: #1a1b21;
+      box-shadow: 0 -16px 42px #0008;
+    }
+
+    .sheet.handle-visible {
+      height: 520px;
+    }
+
+    .handle {
+      width: 38px;
+      height: 4px;
+      margin: 8px auto 8px;
+      border-radius: 999px;
+      background: #60616c;
+    }
+
+    .sheet-heading {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+    }
+
+    .sheet-heading h4 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .sheet-close {
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 50%;
+      background: var(--raised);
+      color: var(--text);
+      font-size: 16px;
+    }
+
+    .sheet-search {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 4px 16px 10px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 0 11px;
+      color: var(--muted);
+      background: var(--soft);
+      font-size: 10px;
+    }
+
+    .source-options {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 7px;
+      margin: 0 16px 12px;
+    }
+
+    .source-option {
+      height: 54px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--raised);
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .source-option.active {
+      border-color: #9d886b;
+      color: var(--text);
+      background: var(--accent-soft);
+    }
+
+    .picker-list {
+      margin: 0 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .picker-row {
+      height: 58px;
+      display: grid;
+      grid-template-columns: 44px 1fr 30px;
+      align-items: center;
+      gap: 9px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .picker-art {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      background: linear-gradient(145deg, #806554, #3d4c55);
+    }
+
+    .picker-row:nth-child(2) .picker-art {
+      background: radial-gradient(circle at 50% 45%, #d9bd95 0 12%, transparent 13%), #596b63;
+    }
+
+    .picker-row:nth-child(3) .picker-art {
+      background: linear-gradient(135deg, #554761, #c09c79);
+    }
+
+    .picker-row.special .picker-art {
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #31403c, #1d2328);
+      color: #b7cbbf;
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .picker-name strong,
+    .picker-name small {
+      display: block;
+    }
+
+    .picker-name strong {
+      font-size: 10px;
+    }
+
+    .picker-name small {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 8px;
+    }
+
+    .picker-add {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--accent);
+      background: var(--soft);
+      font-size: 16px;
+    }
+
+    .pin-picker-list {
+      height: 180px;
+      overflow: hidden;
+    }
+
+    .player {
+      position: absolute;
+      right: 9px;
+      bottom: 9px;
+      left: 9px;
+      height: 72px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid #5b5147;
+      border-radius: 16px;
+      padding: 9px 10px;
+      background: #2b2925;
+      box-shadow: 0 -8px 24px #0005;
+    }
+
+    .player-cover {
+      width: 50px;
+      height: 50px;
+      flex: 0 0 50px;
+      border-radius: 8px;
+      background: linear-gradient(145deg, #d1ad76 0 22%, #5e6d6e 23% 49%, #26303b 50%);
+    }
+
+    .player-text {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .player-text strong,
+    .player-text small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .player-text strong { font-size: 11px; }
+    .player-text small { margin-top: 4px; color: #c8bbb1; font-size: 9px; }
+    .player-controls { display: flex; align-items: center; gap: 9px; font-size: 17px; }
+    .play-button { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: #f1ede8; color: #19191d; font-size: 15px; }
+
+    .takeaway {
+      max-width: 390px;
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .takeaway strong { color: var(--accent); }
+
+    @media (max-width: 1260px) {
+      .mock-grid { grid-template-columns: 390px 390px; }
+      .mock-grid > section:last-child { grid-column: 1 / -1; margin-top: 8px; }
+    }
+
+    @media (max-width: 860px) {
+      .page { padding: 30px 16px 55px; }
+      .mock-grid { grid-template-columns: 1fr; }
+      .mock-grid > section,
+      .mock-grid > section:last-child { grid-column: auto; }
+      .phone, .description, .takeaway { max-width: 390px; }
+      .phone { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="eyebrow">Lyriamp · personalized home exploration</div>
+    <h1>Home should belong to the listener</h1>
+    <p class="intro">Replace duplicate category buttons with pinned, personal destinations and configurable dynamic shelves drawn from the LMS library.</p>
+    <div class="note">Review mock · content is illustrative · interactions show the proposed customization model</div>
+
+    <div class="mock-grid">
+      <section>
+        <div class="concept-heading"><span>01</span><h2>Personalized Home</h2></div>
+        <p class="description">Pinned destinations stay fixed while dynamic shelves give the page a reason to change.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>5G · 82%</span></div>
+          <div class="top"><h3>Library</h3><div class="top-actions"><button class="top-action" aria-label="Search">⌕</button><button class="top-action settings" aria-label="Settings">⚙</button></div></div>
+          <div class="tabs"><span class="tab active">Home</span><span class="tab">Artists</span><span class="tab">Albums</span><span class="tab">Genres</span><span class="tab">Songs</span></div>
+          <div class="screen home-screen">
+            <div class="home-header"><div><div class="eyebrow-small">Your library</div><h4>Welcome back</h4></div><button class="customize-button">Customize</button></div>
+
+            <div class="section-heading"><strong>Pinned</strong><span>Edit</span></div>
+            <div class="pin-rail">
+              <div class="pin-card"><div class="pin-art"></div><div class="pin-name">Miles Davis</div></div>
+              <div class="pin-card"><div class="pin-art"></div><div class="pin-name">Blue Train</div></div>
+              <div class="pin-card special"><div class="pin-art">↝</div><div class="pin-name">Shuffle</div></div>
+              <div class="pin-card"><div class="pin-art">♥</div><div class="pin-name">Favorites</div></div>
+            </div>
+
+            <div class="strip">
+              <div class="section-heading"><strong>Recently added</strong><span>See all</span></div>
+              <div class="strip-row">
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Northern Air</strong><small class="strip-detail">Hollow Light</small></div>
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Blue Hours</strong><small class="strip-detail">Nora Vale</small></div>
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Field Notes</strong><small class="strip-detail">Lowland</small></div>
+              </div>
+            </div>
+
+            <div class="strip compact">
+              <div class="section-heading"><strong>Most played</strong><span>See all</span></div>
+              <div class="strip-row">
+                <div class="strip-item"><div class="strip-cover"></div><div><strong class="strip-name">Blue in Green</strong><small class="strip-detail">Miles Davis · 342 plays</small></div></div>
+                <div class="strip-item"><div class="strip-cover"></div><div><strong class="strip-name">Autumn Leaves</strong><small class="strip-detail">Cannonball Adderley · 208</small></div></div>
+              </div>
+            </div>
+
+            <div class="strip">
+              <div class="section-heading"><strong>Recently played</strong><span>See all</span></div>
+              <div class="strip-row">
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Kind of Blue</strong><small class="strip-detail">Miles Davis</small></div>
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Still Here</strong><small class="strip-detail">Hollow Light</small></div>
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Wide Open</strong><small class="strip-detail">Northbound</small></div>
+              </div>
+            </div>
+          </div>
+          <div class="player"><div class="player-cover"></div><div class="player-text"><strong>Autumn Leaves</strong><small>Cannonball Adderley · Autumn Leaves</small></div><div class="player-controls"><span>│◀</span><span class="play-button">▶</span><span>▶│</span></div></div>
+        </div>
+        <p class="takeaway"><strong>Core idea:</strong> Pinned items are specific library destinations. Dynamic shelves update from LMS data and are independent of the tab strip.</p>
+      </section>
+
+      <section>
+        <div class="concept-heading"><span>02</span><h2>Settings: Home layout</h2></div>
+        <p class="description">The existing Settings area owns a dedicated Home editor with pin selection, section ordering, visibility, and density.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>5G · 82%</span></div>
+          <div class="settings-screen">
+            <div class="settings-header"><span class="back">‹</span><h4>Settings</h4></div>
+            <div class="settings-scroll">
+              <div class="settings-title"><strong>Customize Home</strong><span>Choose what appears on your library home</span></div>
+
+              <div class="settings-card">
+                <div class="settings-card-heading"><strong>Pinned items</strong><button class="text-button">+ Add</button></div>
+                <div class="pin-editor">
+                  <div class="pin-editor-item"><div class="mini-art"></div><span>Miles Davis</span><span class="remove">×</span></div>
+                  <div class="pin-editor-item"><div class="mini-art"></div><span>Blue Train</span><span class="remove">×</span></div>
+                  <div class="pin-editor-item"><div class="mini-art"></div><span>Jazz</span><span class="remove">×</span></div>
+                  <div class="pin-editor-item special"><div class="mini-art">↝</div><span>Shuffle artists</span><span class="remove">×</span></div>
+                  <div class="pin-editor-item"><div class="mini-art"></div><span>Favorites</span><span class="remove">×</span></div>
+                  <div class="add-pin">+ Add pin</div>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-heading"><strong>Home sections</strong><button class="text-button">Reset</button></div>
+                <div class="section-row"><span class="drag">⠿</span><span class="section-icon">+</span><span class="section-name"><strong>Recently added</strong><small>Albums</small></span><span class="toggle on"></span><span class="chevron">›</span></div>
+                <div class="section-row"><span class="drag">⠿</span><span class="section-icon">▶</span><span class="section-name"><strong>Most played</strong><small>Songs · 20 items</small></span><span class="toggle on"></span><span class="chevron">›</span></div>
+                <div class="section-row"><span class="drag">⠿</span><span class="section-icon">↻</span><span class="section-name"><strong>Recently played</strong><small>Artists or albums</small></span><span class="toggle on"></span><span class="chevron">›</span></div>
+                <div class="section-row"><span class="drag">⠿</span><span class="section-icon">♧</span><span class="section-name"><strong>Surprise me</strong><small>Random tracks</small></span><span class="toggle"></span><span class="chevron">›</span></div>
+              </div>
+
+              <div class="settings-card">
+                <div class="settings-card-heading"><strong>Layout</strong></div>
+                <div class="density"><span class="density-option">Compact</span><span class="density-option active">Comfortable</span><span class="density-option">Spacious</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="takeaway"><strong>Customization:</strong> Drag sections to reorder, toggle shelves, edit limits and types, choose density, and manage individual pins.</p>
+      </section>
+
+      <section>
+        <div class="concept-heading"><span>03</span><h2>Pin picker</h2></div>
+        <p class="description">Adding a pin uses a search-first bottom sheet and supports the same library item types as real browse destinations.</p>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>5G · 82%</span></div>
+          <div class="top"><h3>Library</h3><div class="top-actions"><button class="top-action">⌕</button><button class="top-action settings">⚙</button></div></div>
+          <div class="tabs"><span class="tab active">Home</span><span class="tab">Artists</span><span class="tab">Albums</span><span class="tab">Genres</span><span class="tab">Songs</span></div>
+          <div class="screen home-screen">
+            <div class="home-header"><div><div class="eyebrow-small">Your library</div><h4>Welcome back</h4></div><button class="customize-button">Customize</button></div>
+            <div class="section-heading"><strong>Pinned</strong><span>Edit</span></div>
+            <div class="pin-rail">
+              <div class="pin-card"><div class="pin-art"></div><div class="pin-name">Miles Davis</div></div>
+              <div class="pin-card"><div class="pin-art"></div><div class="pin-name">Blue Train</div></div>
+              <div class="pin-card special"><div class="pin-art">↝</div><div class="pin-name">Shuffle</div></div>
+              <div class="pin-card"><div class="pin-art">♥</div><div class="pin-name">Favorites</div></div>
+            </div>
+            <div class="strip">
+              <div class="section-heading"><strong>Recently added</strong><span>See all</span></div>
+              <div class="strip-row">
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Northern Air</strong><small class="strip-detail">Hollow Light</small></div>
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Blue Hours</strong><small class="strip-detail">Nora Vale</small></div>
+                <div class="strip-item"><div class="strip-cover"></div><strong class="strip-name">Field Notes</strong><small class="strip-detail">Lowland</small></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sheet handle-visible">
+            <div class="handle"></div>
+            <div class="sheet-heading"><h4>Add pinned item</h4><button class="sheet-close">×</button></div>
+            <div class="sheet-search"><span>⌕</span><span>Search actions</span></div>
+            <div class="source-options"><span class="source-option">Artist</span><span class="source-option">Album</span><span class="source-option">Genre</span><span class="source-option">Playlist</span><span class="source-option active">Special</span></div>
+            <div class="pin-picker-list">
+              <div class="picker-list">
+                <div class="picker-row special"><div class="picker-art">↝</div><div class="picker-name"><strong>Shuffle</strong><small>Action · all tracks</small></div><span class="picker-add">+</span></div>
+                <div class="picker-row special"><div class="picker-art">A↝</div><div class="picker-name"><strong>Shuffle artists</strong><small>Action · random artist order</small></div><span class="picker-add">+</span></div>
+                <div class="picker-row special"><div class="picker-art">◫↝</div><div class="picker-name"><strong>Shuffle albums</strong><small>Action · random album order</small></div><span class="picker-add">+</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="takeaway"><strong>Pin sources:</strong> Artist, album, genre, saved playlist, or a special action such as Shuffle, Shuffle artists, Shuffle albums, and Favorites. Additions become a visible Home card.</p>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
