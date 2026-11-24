@@ -26,7 +26,8 @@ enum class LmsLibraryQuery(
         "id",
         "title",
         LmsLibraryItemType.TRACK
-    )
+    ),
+    FAVORITES(listOf("favorites"), "favorites_loop", "item_id", "title", LmsLibraryItemType.TRACK)
 }
 
 enum class LmsLibrarySort(
@@ -53,6 +54,12 @@ enum class LmsLibrarySort(
 enum class LmsLibrarySortOrder {
     ASCENDING,
     DESCENDING
+}
+
+enum class LmsShuffleScope {
+    TRACKS,
+    ARTISTS,
+    ALBUMS
 }
 
 fun LmsLibraryQuery.supportedSortOptions(): List<LmsLibrarySort> = when (this) {
@@ -83,7 +90,8 @@ fun LmsLibraryQuery.supportedSortOptions(): List<LmsLibrarySort> = when (this) {
         LmsLibrarySort.ALBUM_TRACK
     )
     LmsLibraryQuery.GENRES,
-    LmsLibraryQuery.PLAYLISTS -> emptyList()
+    LmsLibraryQuery.PLAYLISTS,
+    LmsLibraryQuery.FAVORITES -> emptyList()
 }
 
 data class LmsLibraryFilter(
@@ -91,7 +99,8 @@ data class LmsLibraryFilter(
     val albumId: String? = null,
     val genreId: String? = null,
     val playlistId: String? = null,
-    val folderId: String? = null
+    val folderId: String? = null,
+    val favoriteId: String? = null
 )
 
 data class LmsLibraryItem(
@@ -106,6 +115,7 @@ data class LmsLibraryItem(
     val isContainer: Boolean = false,
     val year: String? = null,
     val albumId: String? = null,
+    val favoriteId: String? = null,
     val discNumber: Int? = null,
     val trackNumber: Int? = null
 )
@@ -161,4 +171,20 @@ interface LmsLibraryGateway {
         playerId: String,
         item: LmsLibraryItem
     )
+
+    suspend fun playNowSection(
+        connection: LmsServerConnection,
+        playerId: String,
+        items: List<LmsLibraryItem>
+    ) {
+        throw UnsupportedOperationException("Play section is not implemented by this gateway.")
+    }
+
+    suspend fun shuffleLibrary(
+        connection: LmsServerConnection,
+        playerId: String,
+        scope: LmsShuffleScope
+    ) {
+        throw UnsupportedOperationException("Shuffle library is not implemented by this gateway.")
+    }
 }

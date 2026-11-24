@@ -106,6 +106,7 @@ class DataStoreLastSessionRepository(
                 location.filter.genreId?.let { put("genreId", it) }
                 location.filter.playlistId?.let { put("playlistId", it) }
                 location.filter.folderId?.let { put("folderId", it) }
+                location.filter.favoriteId?.let { put("favoriteId", it) }
             })
         }
     }
@@ -158,7 +159,8 @@ class DataStoreLastSessionRepository(
                     albumId = value.string("albumId"),
                     genreId = value.string("genreId"),
                     playlistId = value.string("playlistId"),
-                    folderId = value.string("folderId")
+                    folderId = value.string("folderId"),
+                    favoriteId = value.string("favoriteId")
                 )
             )
         }

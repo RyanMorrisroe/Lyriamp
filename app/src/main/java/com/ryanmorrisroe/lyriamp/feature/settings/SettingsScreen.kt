@@ -29,7 +29,8 @@ import com.ryanmorrisroe.lyriamp.ui.glyph.BackArrowIcon
 fun SettingsScreen(
     viewModel: DisplayPreferencesViewModel,
     onBack: () -> Unit,
-    onConnections: () -> Unit
+    onConnections: () -> Unit,
+    onCustomizeHome: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     Scaffold(
@@ -76,6 +77,11 @@ fun SettingsScreen(
                 Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
                 TextButton(onClick = viewModel::retry) { Text("Retry reading settings") }
             }
+            ListItem(
+                modifier = Modifier.clickable(onClick = onCustomizeHome),
+                headlineContent = { Text("Customize Home") },
+                supportingContent = { Text("Pins, dynamic sections, and layout") }
+            )
             ListItem(
                 modifier = Modifier.clickable(onClick = onConnections),
                 headlineContent = { Text("Connections") },

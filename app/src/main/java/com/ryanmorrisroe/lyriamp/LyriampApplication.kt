@@ -16,6 +16,8 @@ import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreLastSessionRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreDisplayPreferencesRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.DataStorePlayerGroupRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferencesRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.HomePreferencesRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.DataStoreHomePreferencesRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.displayPreferencesDataStore
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.PlayerGroupRepository
@@ -56,6 +58,9 @@ class LyriampApplication : Application() {
     }
     val displayPreferencesRepository: DisplayPreferencesRepository by lazy {
         DataStoreDisplayPreferencesRepository(applicationContext.displayPreferencesDataStore)
+    }
+    val homePreferencesRepository: HomePreferencesRepository by lazy {
+        DataStoreHomePreferencesRepository(applicationContext.displayPreferencesDataStore)
     }
 
     lateinit var connectionGateway: LmsConnectionGateway

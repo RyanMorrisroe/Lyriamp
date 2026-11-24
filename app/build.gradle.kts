@@ -71,6 +71,7 @@ kover {
                         "com.ryanmorrisroe.lyriamp.data.lms.*",
                         "com.ryanmorrisroe.lyriamp.data.persistence.*",
                         "com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel",
+                        "com.ryanmorrisroe.lyriamp.feature.library.HomeViewModel*",
                         "com.ryanmorrisroe.lyriamp.feature.library.LibraryCategory",
                         "com.ryanmorrisroe.lyriamp.feature.library.LibraryLocation",
                         "com.ryanmorrisroe.lyriamp.feature.library.LibraryUiState",
