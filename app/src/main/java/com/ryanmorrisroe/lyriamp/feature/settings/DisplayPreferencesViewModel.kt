@@ -7,6 +7,7 @@ import com.ryanmorrisroe.lyriamp.data.persistence.Appearance
 import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferences
 import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferencesRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryLayout
+import com.ryanmorrisroe.lyriamp.data.persistence.LibrarySortPreference
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -52,6 +53,10 @@ class DisplayPreferencesViewModel(
 
     fun setLayout(type: LibraryViewType, layout: LibraryLayout) = save {
         repository.setLayout(type, layout)
+    }
+
+    fun setSort(type: LibraryViewType, preference: LibrarySortPreference) = save {
+        repository.setSort(type, preference)
     }
 
     private fun save(operation: suspend () -> Unit) {

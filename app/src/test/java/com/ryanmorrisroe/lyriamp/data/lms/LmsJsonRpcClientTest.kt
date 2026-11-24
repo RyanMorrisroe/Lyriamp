@@ -217,6 +217,37 @@ class LmsJsonRpcClientTest {
     }
 
     @Test
+    fun requestsSelectedAlbumSortMode() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """{"id":1,"result":{"count":1,"albums_loop":[
+                    {"id":42,"album":"Blue Train","artist":"John Coltrane"}
+                ]}}"""
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.ALBUMS,
+                offset = 0,
+                limit = 30,
+                sort = LmsLibrarySort.YEAR_ALBUM
+            )
+
+            assertEquals(1, page.totalCount)
+            assertEquals(
+                listOf("albums", "0", "30", "tags:aljKy", "sort:yearalbum"),
+                capturedCommand(capturedRequest)
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun requestsAlbumArtistPortraitsForArtistPages() = runBlocking {
         var capturedRequest: HttpRequestData? = null
         val client = HttpClient(MockEngine { request ->
@@ -366,8 +397,102 @@ class LmsJsonRpcClientTest {
 
             assertEquals("501", page.items.single().artworkId)
             assertEquals(
-                listOf("titles", "0", "30", "tags:galdeKJc"),
+                listOf("titles", "0", "30", "tags:galdeitKJc"),
                 capturedCommand(capturedRequest)
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun readsAlbumTrackDiscAndTrackNumbersAndRequestsAlbumTrackSort() = runBlocking {
+        var capturedRequest: HttpRequestData? = null
+        val client = HttpClient(MockEngine { request ->
+            capturedRequest = request
+            respondJson(
+                """
+                {"id":1,"result":{"count":1,"titles_loop":[
+                    {"id":7,"title":"Track","album":"Album","album_id":42,
+                     "disc":"2","tracknum":"3/10","duration":180}
+                ]}}
+                """.trimIndent()
+            )
+        })
+
+        try {
+            val page = LmsJsonRpcClient(client).getPage(
+                connection = LmsServerConnection("lms.local"),
+                query = LmsLibraryQuery.TRACKS,
+                offset = 0,
+                limit = 30,
+                filter = LmsLibraryFilter(albumId = "42")
+            )
+            val track = page.items.single()
+
+            assertEquals("42", track.albumId)
+            assertEquals(2, track.discNumber)
+            assertEquals(3, track.trackNumber)
+            assertEquals(
+                listOf(
+                    "titles",
+                    "0",
+                    "30",
+                    "tags:galdeitKJc",
+                    "sort:albumtrack",
+                    "album_id:42"
+                ),
+                capturedCommand(capturedRequest)
+            )
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun playingAlbumTrackQueuesLaterTracksInDiscAndTrackOrder() = runBlocking {
+        val commands = mutableListOf<List<String>>()
+        val client = HttpClient(MockEngine { request ->
+            val requestJson = Json.parseToJsonElement(
+                (request.body as TextContent).text
+            ).jsonObject
+            commands += requestJson["params"]!!.jsonArray[1].jsonArray.map {
+                it.jsonPrimitive.content
+            }
+            respondJson(
+                """
+                {"id":1,"result":{"count":4,"titles_loop":[
+                    {"id":11,"title":"Disc 1 Track 1","album_id":42,"disc":1,"tracknum":1},
+                    {"id":12,"title":"Disc 1 Track 2","album_id":42,"disc":1,"tracknum":2},
+                    {"id":21,"title":"Disc 2 Track 1","album_id":42,"disc":2,"tracknum":1},
+                    {"id":22,"title":"Disc 2 Track 2","album_id":42,"disc":2,"tracknum":2}
+                ]}}
+                """.trimIndent()
+            )
+        })
+
+        try {
+            LmsJsonRpcClient(client).playNow(
+                connection = LmsServerConnection("lms.local"),
+                playerId = "player-1",
+                item = LmsLibraryItem(
+                    id = "12",
+                    type = LmsLibraryItemType.TRACK,
+                    title = "Disc 1 Track 2",
+                    albumId = "42",
+                    discNumber = 1,
+                    trackNumber = 2
+                )
+            )
+
+            assertEquals(
+                listOf(
+                    listOf("titles", "0", "100", "tags:galdeitKJc", "sort:albumtrack", "album_id:42"),
+                    listOf("playlistcontrol", "cmd:load", "track_id:12"),
+                    listOf("playlistcontrol", "cmd:add", "track_id:21"),
+                    listOf("playlistcontrol", "cmd:add", "track_id:22")
+                ),
+                commands
             )
         } finally {
             client.close()
@@ -820,7 +945,14 @@ class LmsJsonRpcClientTest {
             gateway.addQueueItem(
                 connection,
                 "player-1",
-                LmsLibraryItem("track-1", LmsLibraryItemType.TRACK, "Track"),
+                LmsLibraryItem(
+                    "track-1",
+                    LmsLibraryItemType.TRACK,
+                    "Track",
+                    albumId = "42",
+                    discNumber = 1,
+                    trackNumber = 3
+                ),
                 LmsQueueAddPosition.END
             )
             gateway.addQueueItem(

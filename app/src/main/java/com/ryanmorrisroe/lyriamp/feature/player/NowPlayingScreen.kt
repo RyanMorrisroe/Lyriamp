@@ -148,8 +148,24 @@ fun NowPlayingScreen(
                         }
                     },
                     actions = {
-                        TextButton(onClick = onChoosePlayer) {
-                            Text(currentPlayerName ?: "Players", maxLines = 1)
+                        TextButton(
+                            onClick = onChoosePlayer,
+                            modifier = Modifier.semantics {
+                                contentDescription =
+                                    "Change player, ${currentPlayerName ?: "Players"}"
+                            }
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                PlayerGlyphIcon(
+                                    PlayerGlyph.SPEAKER,
+                                    MaterialTheme.colorScheme.onSurface,
+                                    Modifier.size(24.dp)
+                                )
+                                Text(currentPlayerName ?: "Players", maxLines = 1)
+                            }
                         }
                     }
                 )
@@ -168,7 +184,20 @@ fun NowPlayingScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Surface(
-                modifier = Modifier.fillMaxWidth().size(300.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .size(300.dp)
+                    .then(
+                        if (NowPlayingDismissConfig.artworkTargetEnabled) {
+                            Modifier.nowPlayingSwipeToDismiss(
+                                isGestureAllowed = { scrollState.value == 0 },
+                                onDismiss = onBack
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .testTag("now-playing-artwork"),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = MaterialTheme.shapes.medium
             ) {
@@ -400,30 +429,77 @@ fun NowPlayingScreen(
     }
 }
 
+internal object NowPlayingDismissConfig {
+    const val thresholdDp = 48f
+    const val artworkTargetEnabled = true
+    const val handleTargetEnabled = true
+}
+
+internal fun shouldDismissNowPlaying(
+    cumulativeDragPx: Float,
+    dismissalThresholdPx: Float,
+    startedAtTop: Boolean
+): Boolean = startedAtTop && cumulativeDragPx >= dismissalThresholdPx
+
+@Composable
+private fun Modifier.nowPlayingSwipeToDismiss(
+    isGestureAllowed: () -> Boolean,
+    onDismiss: () -> Unit
+): Modifier {
+    val dismissalThreshold = with(LocalDensity.current) {
+        NowPlayingDismissConfig.thresholdDp.dp.toPx()
+    }
+    val latestIsGestureAllowed by rememberUpdatedState(isGestureAllowed)
+    val latestOnDismiss by rememberUpdatedState(onDismiss)
+
+    return pointerInput(dismissalThreshold) {
+        var cumulativeDrag = 0f
+        var gestureAllowedAtStart = false
+        detectVerticalDragGestures(
+            onDragStart = {
+                cumulativeDrag = 0f
+                gestureAllowedAtStart = latestIsGestureAllowed()
+            },
+            onDragEnd = {
+                val shouldDismiss = shouldDismissNowPlaying(
+                    cumulativeDragPx = cumulativeDrag,
+                    dismissalThresholdPx = dismissalThreshold,
+                    startedAtTop = gestureAllowedAtStart
+                )
+                cumulativeDrag = 0f
+                gestureAllowedAtStart = false
+                if (shouldDismiss) latestOnDismiss()
+            },
+            onDragCancel = {
+                cumulativeDrag = 0f
+                gestureAllowedAtStart = false
+            },
+            onVerticalDrag = { change, dragAmount ->
+                cumulativeDrag += dragAmount
+                if (gestureAllowedAtStart && dragAmount > 0f) {
+                    change.consume()
+                }
+            }
+        )
+    }
+}
+
 @Composable
 private fun NowPlayingDismissHandle(onDismiss: () -> Unit) {
-    val dismissalThreshold = with(LocalDensity.current) { 48.dp.toPx() }
-    val latestOnDismiss by rememberUpdatedState(onDismiss)
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(32.dp)
-            .pointerInput(dismissalThreshold) {
-                var cumulativeDrag = 0f
-                detectVerticalDragGestures(
-                    onDragStart = { cumulativeDrag = 0f },
-                    onDragEnd = {
-                        val shouldDismiss = cumulativeDrag >= dismissalThreshold
-                        cumulativeDrag = 0f
-                        if (shouldDismiss) latestOnDismiss()
-                    },
-                    onDragCancel = { cumulativeDrag = 0f },
-                    onVerticalDrag = { change, dragAmount ->
-                        cumulativeDrag += dragAmount
-                        change.consume()
-                    }
-                )
-            }
+            .then(
+                if (NowPlayingDismissConfig.handleTargetEnabled) {
+                    Modifier.nowPlayingSwipeToDismiss(
+                        isGestureAllowed = { true },
+                        onDismiss = onDismiss
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .testTag("now-playing-dismiss-handle")
             .semantics {
                 contentDescription = "Swipe down here to collapse Now Playing"
@@ -849,6 +925,7 @@ private enum class PlayerGlyph {
     REPEAT,
     REPEAT_ONE,
     SHUFFLE,
+    SPEAKER,
     DRAG_HANDLE
 }
 
@@ -964,6 +1041,23 @@ private fun PlayerGlyphIcon(
                 ))
                 line(18f, 4f, 21f, 7f)
                 line(18f, 10f, 21f, 7f)
+            }
+            PlayerGlyph.SPEAKER -> {
+                line(5f, 2f, 19f, 2f)
+                line(19f, 2f, 19f, 22f)
+                line(19f, 22f, 5f, 22f)
+                line(5f, 22f, 5f, 2f)
+                drawCircle(
+                    color = color,
+                    radius = 4f * unit,
+                    center = Offset(12f * unit, 16f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
+                drawCircle(
+                    color = color,
+                    radius = 2f * unit,
+                    center = Offset(12f * unit, 7f * unit)
+                )
             }
             PlayerGlyph.DRAG_HANDLE -> {
                 for (x in listOf(8f, 16f)) {

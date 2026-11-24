@@ -41,6 +41,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -103,6 +106,8 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsHttpException
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItem
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySort
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySortOrder
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerStatus
@@ -112,8 +117,10 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsRepeatMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
 import com.ryanmorrisroe.lyriamp.data.lms.LmsShuffleMode
 import com.ryanmorrisroe.lyriamp.data.lms.artworkSource
+import com.ryanmorrisroe.lyriamp.data.lms.supportedSortOptions
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryLayout
+import com.ryanmorrisroe.lyriamp.data.persistence.LibrarySortPreference
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
@@ -155,7 +162,7 @@ fun LibraryScreen(
         libraryCategories.filterNot { it.query == LmsLibraryQuery.PLAYLISTS }
     }
     var searchVisible by remember { mutableStateOf(false) }
-    var actionsExpanded by remember { mutableStateOf(false) }
+    var sortSheetVisible by remember { mutableStateOf(false) }
     val items = viewModel.items.collectAsLazyPagingItems()
     val viewType = if (state.searchText.isNotBlank()) LibraryViewType.SEARCH else when (state.location.query) {
         LmsLibraryQuery.ARTISTS -> LibraryViewType.ARTISTS
@@ -335,36 +342,29 @@ fun LibraryScreen(
                             )
                         }
                     }
-                    if (!queuePickerMode) Box {
+                    if (!queuePickerMode) {
                         IconButton(
-                            onClick = { actionsExpanded = true },
+                            onClick = onChangePlayer,
                             modifier = Modifier.semantics {
-                                contentDescription = "More actions"
+                                contentDescription = "Change players"
                             }
                         ) {
                             LibraryGlyphIcon(
-                                LibraryGlyph.MORE,
+                                LibraryGlyph.SPEAKER,
                                 MaterialTheme.colorScheme.onSurface,
                                 Modifier.size(24.dp)
                             )
                         }
-                        DropdownMenu(
-                            expanded = actionsExpanded,
-                            onDismissRequest = { actionsExpanded = false }
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Settings"
+                            }
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("Players") },
-                                onClick = {
-                                    actionsExpanded = false
-                                    onChangePlayer()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Settings") },
-                                onClick = {
-                                    actionsExpanded = false
-                                    onOpenSettings()
-                                }
+                            LibraryGlyphIcon(
+                                LibraryGlyph.SETTINGS,
+                                MaterialTheme.colorScheme.onSurface,
+                                Modifier.size(24.dp)
                             )
                         }
                     }
@@ -557,21 +557,41 @@ fun LibraryScreen(
                             .padding(start = 20.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (state.searchText.isBlank()) {
-                                "Browse ${state.location.title}"
-                            } else {
-                                "Search results"
-                            },
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1
-                        )
                         if (viewType != LibraryViewType.GENRES) {
                             LibraryLayoutSelector(
                                 viewType = viewType,
                                 selectedLayout = layout,
                                 onSelect = { displayPreferencesViewModel.setLayout(viewType, it) }
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        val albumTrackListing = state.location.query == LmsLibraryQuery.TRACKS &&
+                            state.location.filter.albumId != null
+                        val sortPreference = if (
+                            state.searchText.isBlank() &&
+                            viewType != LibraryViewType.GENRES &&
+                            viewType != LibraryViewType.SEARCH &&
+                            !albumTrackListing
+                        ) {
+                            displayState.preferences.sortFor(viewType)
+                        } else {
+                            null
+                        }
+                        if (sortPreference != null) {
+                            LibrarySortChip(
+                                preference = sortPreference,
+                                onClick = { sortSheetVisible = true }
+                            )
+                        }
+                        if (sortSheetVisible && sortPreference != null) {
+                            val sortOptions = state.location.query?.supportedSortOptions().orEmpty()
+                            LibrarySortSheet(
+                                preference = sortPreference,
+                                options = sortOptions,
+                                onPreferenceChange = { preference ->
+                                    displayPreferencesViewModel.setSort(viewType, preference)
+                                },
+                                onDismiss = { sortSheetVisible = false }
                             )
                         }
                     }
@@ -583,6 +603,8 @@ fun LibraryScreen(
                     isSearchResults = state.searchText.isNotBlank(),
                     activePlayer = state.activePlayer,
                     isPlayingItem = state.isPlayingItem,
+                    albumTrackListing = state.location.query == LmsLibraryQuery.TRACKS &&
+                        state.location.filter.albumId != null,
                     onOpenItem = viewModel::openItem,
                     onPlayNow = viewModel::playNow,
                     onAddToQueue = { item ->
@@ -624,6 +646,7 @@ private fun LibraryResults(
     isSearchResults: Boolean,
     activePlayer: LmsActivePlayer?,
     isPlayingItem: Boolean,
+    albumTrackListing: Boolean,
     onOpenItem: (LmsLibraryItem) -> Unit,
     onPlayNow: (LmsLibraryItem) -> Unit,
     onAddToQueue: (LmsLibraryItem) -> Unit,
@@ -664,41 +687,70 @@ private fun LibraryResults(
         ) { index ->
             val item = items[index]
             if (item != null) {
+                val loadedDiscNumbers = items.itemSnapshotList.items
+                    .mapNotNull { loadedItem -> loadedItem.discNumber?.takeIf { it > 0 } }
+                    .distinct()
+                val isMultiDiscAlbum = albumTrackListing && loadedDiscNumbers.size > 1
+                val previousDiscNumber = if (index > 0) items.peek(index - 1)?.discNumber else null
+                val discHeaderNumber = item.discNumber?.takeIf { discNumber ->
+                    isMultiDiscAlbum &&
+                        discNumber > 0 &&
+                        (index == 0 || previousDiscNumber != discNumber)
+                }
+                val discTrackCount = discHeaderNumber?.let { discNumber ->
+                    items.itemSnapshotList.items.count { loadedItem ->
+                        loadedItem.discNumber?.takeIf { it > 0 } == discNumber
+                    }
+                } ?: 0
+
                 if (layout == LibraryLayout.COVER_WALL) {
-                    LibraryItemCard(
-                        item = item,
-                        connection = activePlayer?.connection,
-                        isSearchResults = isSearchResults,
-                        isPlayingItem = isPlayingItem,
-                        onResolveArtistArtwork = onResolveArtistArtwork,
-                        onOpen = {
-                            if (queuePickerMode && item.type == LmsLibraryItemType.TRACK) {
-                                onAddToQueue(item)
-                            } else {
-                                onOpenItem(item)
-                            }
-                        },
-                        onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
-                        onAddToQueue = { onAddToQueue(item) },
-                        onPlayNext = { onPlayNext(item) },
-                        isQueueBusy = isQueueBusy,
-                        queuePickerMode = queuePickerMode
-                    )
+                    Column {
+                        if (discHeaderNumber != null) {
+                            AlbumDiscHeader(discHeaderNumber, discTrackCount)
+                        }
+                        LibraryItemCard(
+                            item = item,
+                            connection = activePlayer?.connection,
+                            isSearchResults = isSearchResults,
+                            isPlayingItem = isPlayingItem,
+                            onResolveArtistArtwork = onResolveArtistArtwork,
+                            trackNumber = item.trackNumber,
+                            onOpen = {
+                                if (queuePickerMode && item.type == LmsLibraryItemType.TRACK) {
+                                    onAddToQueue(item)
+                                } else {
+                                    onOpenItem(item)
+                                }
+                            },
+                            onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
+                            onAddToQueue = { onAddToQueue(item) },
+                            onPlayNext = { onPlayNext(item) },
+                            isQueueBusy = isQueueBusy,
+                            queuePickerMode = queuePickerMode
+                        )
+                    }
                 } else {
-                    LibraryItemRow(
-                        item = item,
-                        connection = activePlayer?.connection,
-                        showArtwork = layout == LibraryLayout.COMFORTABLE,
-                        isSearchResults = isSearchResults,
-                        isPlayingItem = isPlayingItem,
-                        onResolveArtistArtwork = onResolveArtistArtwork,
-                        onOpen = { onOpenItem(item) },
-                        onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
-                        onAddToQueue = { onAddToQueue(item) },
-                        onPlayNext = { onPlayNext(item) },
-                        isQueueBusy = isQueueBusy,
-                        queuePickerMode = queuePickerMode
-                    )
+                    Column {
+                        if (discHeaderNumber != null) {
+                            AlbumDiscHeader(discHeaderNumber, discTrackCount)
+                        }
+                        LibraryItemRow(
+                            item = item,
+                            connection = activePlayer?.connection,
+                            showArtwork = layout == LibraryLayout.COMFORTABLE,
+                            isSearchResults = isSearchResults,
+                            isPlayingItem = isPlayingItem,
+                            onResolveArtistArtwork = onResolveArtistArtwork,
+                            trackNumber = item.trackNumber,
+                            showTrackNumber = albumTrackListing,
+                            onOpen = { onOpenItem(item) },
+                            onPlayNow = { if (queuePickerMode) onAddToQueue(item) else onPlayNow(item) },
+                            onAddToQueue = { onAddToQueue(item) },
+                            onPlayNext = { onPlayNext(item) },
+                            isQueueBusy = isQueueBusy,
+                            queuePickerMode = queuePickerMode
+                        )
+                    }
                 }
             } else {
                 LoadingRow()
@@ -715,6 +767,43 @@ private fun LibraryResults(
 }
 
 @Composable
+private fun AlbumDiscHeader(discNumber: Int, trackCount: Int) {
+    val shape = RoundedCornerShape(9.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(34.dp)
+            .padding(horizontal = 13.dp)
+            .padding(top = 2.dp, bottom = 2.dp)
+            .testTag("album-disc-header-$discNumber"),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "DISC $discNumber",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (trackCount > 0) {
+                Text(
+                    text = "$trackCount ${if (trackCount == 1) "track" else "tracks"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun LibraryItemRow(
     item: LmsLibraryItem,
     connection: LmsServerConnection?,
@@ -722,6 +811,8 @@ private fun LibraryItemRow(
     isSearchResults: Boolean,
     isPlayingItem: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
+    trackNumber: Int?,
+    showTrackNumber: Boolean,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit,
     onAddToQueue: () -> Unit,
@@ -740,15 +831,31 @@ private fun LibraryItemRow(
                 onOpen()
             }
         },
-        leadingContent = if (showArtwork) {
+        leadingContent = if (showArtwork || (showTrackNumber && trackNumber != null)) {
             {
-                LibraryArtwork(
-                    item = item,
-                    connection = connection,
-                    showTypeLabel = isSearchResults,
-                    onResolveArtistArtwork = onResolveArtistArtwork,
-                    modifier = Modifier.size(52.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (showTrackNumber && trackNumber != null) {
+                        Text(
+                            text = trackNumber.toString(),
+                            modifier = Modifier.width(28.dp),
+                            textAlign = TextAlign.End,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (showArtwork) {
+                        LibraryArtwork(
+                            item = item,
+                            connection = connection,
+                            showTypeLabel = isSearchResults,
+                            onResolveArtistArtwork = onResolveArtistArtwork,
+                            modifier = Modifier.size(52.dp)
+                        )
+                    }
+                }
             }
         } else null,
         headlineContent = { Text(item.title, maxLines = 1) },
@@ -781,6 +888,7 @@ private fun LibraryItemCard(
     isSearchResults: Boolean,
     isPlayingItem: Boolean,
     onResolveArtistArtwork: (suspend (LmsServerConnection, LmsLibraryItem) -> String?)?,
+    trackNumber: Int?,
     onOpen: () -> Unit,
     onPlayNow: () -> Unit,
     onAddToQueue: () -> Unit,
@@ -797,7 +905,27 @@ private fun LibraryItemCard(
             onResolveArtistArtwork,
             Modifier.fillMaxWidth().aspectRatio(1f)
         )
-        Text(item.title, maxLines = 1, style = MaterialTheme.typography.titleSmall)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (trackNumber != null) {
+                Text(
+                    text = trackNumber.toString(),
+                    modifier = Modifier.width(24.dp),
+                    textAlign = TextAlign.End,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = item.title,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                style = MaterialTheme.typography.titleSmall
+            )
+        }
         if (subtitle.isNotBlank()) {
             Text(subtitle, maxLines = 1, style = MaterialTheme.typography.bodySmall)
         }
@@ -984,6 +1112,204 @@ private fun LibraryLayout.displayName(): String = when (this) {
     LibraryLayout.COMFORTABLE -> "Comfortable"
 }
 
+private fun LmsLibrarySort.displayName(): String = when (this) {
+    LmsLibrarySort.ARTIST -> "Name"
+    LmsLibrarySort.NEW -> "Recently Added"
+    LmsLibrarySort.PLAY_COUNT -> "Play Count"
+    LmsLibrarySort.POPULAR -> "Popular"
+    LmsLibrarySort.RECENTLY_PLAYED -> "Recently Played"
+    LmsLibrarySort.ALBUM -> "Album"
+    LmsLibrarySort.ARTIST_ALBUM -> "Artist/Album"
+    LmsLibrarySort.YEAR_ALBUM -> "Year/Album"
+    LmsLibrarySort.YEAR_ARTIST_ALBUM -> "Artist/Year/Album"
+    LmsLibrarySort.ART_FLOW -> "Artwork Flow"
+    LmsLibrarySort.CHANGED -> "Changed"
+    LmsLibrarySort.RANDOM -> "Random"
+    LmsLibrarySort.TITLE -> "Title"
+    LmsLibrarySort.TRACK_NUMBER -> "Track Number"
+    LmsLibrarySort.ALBUM_TRACK -> "Album/Track"
+}
+
+private fun LmsLibrarySortOrder.displayName(): String = when (this) {
+    LmsLibrarySortOrder.ASCENDING -> "Ascending"
+    LmsLibrarySortOrder.DESCENDING -> "Descending"
+}
+
+@Composable
+private fun LibrarySortChip(
+    preference: LibrarySortPreference,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(12.dp)
+    val ascending = preference.order == LmsLibrarySortOrder.ASCENDING
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .height(40.dp)
+            .testTag("library-sort-chip"),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SortDirectionGlyph(
+                ascending = ascending,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = preference.sort.displayName(),
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun SortDirectionGlyph(
+    ascending: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier.semantics {
+            contentDescription = if (ascending) "Ascending" else "Descending"
+        }
+    ) {
+        val stroke = 1.8.dp.toPx()
+        val x = size.width / 2f
+        val startY = if (ascending) size.height * 0.82f else size.height * 0.18f
+        val endY = if (ascending) size.height * 0.18f else size.height * 0.82f
+        drawLine(
+            color = color,
+            start = Offset(x, startY),
+            end = Offset(x, endY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        val tipOffset = size.width * 0.22f
+        val headY = if (ascending) size.height * 0.18f else size.height * 0.82f
+        val headOuterY = if (ascending) size.height * 0.38f else size.height * 0.62f
+        drawLine(
+            color = color,
+            start = Offset(x, headY),
+            end = Offset(x - tipOffset, headOuterY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(x, headY),
+            end = Offset(x + tipOffset, headOuterY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun LibrarySortSheet(
+    preference: LibrarySortPreference,
+    options: List<LmsLibrarySort>,
+    onPreferenceChange: (LibrarySortPreference) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text("Sort library", style = MaterialTheme.typography.titleLarge)
+            LibrarySortDropdown(
+                label = "Sort By",
+                value = preference.sort.displayName(),
+                options = options.map { it.displayName() },
+                testTagName = "library-sort-by",
+                onSelected = { label ->
+                    options.firstOrNull { it.displayName() == label }?.let { sort ->
+                        onPreferenceChange(preference.copy(sort = sort))
+                    }
+                }
+            )
+            LibrarySortDropdown(
+                label = "Order",
+                value = preference.order.displayName(),
+                options = LmsLibrarySortOrder.entries.map { it.displayName() },
+                testTagName = "library-sort-order",
+                enabled = preference.sort != LmsLibrarySort.RANDOM,
+                onSelected = { label ->
+                    LmsLibrarySortOrder.entries
+                        .firstOrNull { it.displayName() == label }
+                        ?.let { order ->
+                            onPreferenceChange(preference.copy(order = order))
+                        }
+                }
+            )
+            Text(
+                text = "Changes take effect instantly",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun LibrarySortDropdown(
+    label: String,
+    value: String,
+    options: List<String>,
+    testTagName: String,
+    enabled: Boolean = true,
+    onSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = enabled && it },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled)
+                .testTag(testTagName)
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        expanded = false
+                        onSelected(option)
+                    }
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun LibraryLayoutSelector(
     viewType: LibraryViewType,
@@ -991,9 +1317,13 @@ private fun LibraryLayoutSelector(
     onSelect: (LibraryLayout) -> Unit
 ) {
     val layouts = if (viewType.allowsCoverWall) {
-        LibraryLayout.entries
+        listOf(
+            LibraryLayout.COVER_WALL,
+            LibraryLayout.COMFORTABLE,
+            LibraryLayout.COMPACT
+        )
     } else {
-        listOf(LibraryLayout.COMPACT, LibraryLayout.COMFORTABLE)
+        listOf(LibraryLayout.COMFORTABLE, LibraryLayout.COMPACT)
     }
     val shape = RoundedCornerShape(12.dp)
 
@@ -1010,7 +1340,7 @@ private fun LibraryLayoutSelector(
                     checked = selected,
                     onCheckedChange = { if (it) onSelect(option) },
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(38.dp)
                         .testTag("library-layout-option-${option.name}")
                         .clip(segmentShape)
                         .background(
@@ -1032,7 +1362,7 @@ private fun LibraryLayoutSelector(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(18.dp)
                             .testTag("library-layout-glyph-${option.name}")
                     )
                 }
@@ -1046,13 +1376,14 @@ private enum class LibraryGlyph {
     COMPACT,
     COMFORTABLE,
     COVER_WALL,
-    MORE,
     NEXT,
     PAUSE,
     PLAY,
     PREVIOUS,
     SEARCH,
-    MUSIC
+    MUSIC,
+    SPEAKER,
+    SETTINGS
 }
 
 @Composable
@@ -1099,8 +1430,7 @@ private fun LibraryGlyphIcon(
             }
             LibraryGlyph.COMPACT -> for (row in 0..3) {
                 val top = 2f + row * 5f
-                rect(2f, top, 3f, 3f)
-                rect(8f, top + 0.5f, 14f, 2f)
+                rect(2f, top + 0.5f, 20f, 2f)
             }
             LibraryGlyph.COMFORTABLE -> for (row in 0..2) {
                 val top = 2f + row * 7f
@@ -1113,9 +1443,6 @@ private fun LibraryGlyphIcon(
                         rect(2f + column * 11f, 2f + row * 11f, 9f, 9f)
                     }
                 }
-            }
-            LibraryGlyph.MORE -> for (x in listOf(5f, 12f, 19f)) {
-                drawCircle(color, 1.8f * unit, Offset(x * unit, 12f * unit))
             }
             LibraryGlyph.NEXT -> {
                 triangle(Offset(5f, 5f), Offset(15f, 12f), Offset(5f, 19f))
@@ -1144,6 +1471,45 @@ private fun LibraryGlyphIcon(
                 line(14f, 4f, 21f, 3f)
                 drawCircle(color, 3.5f * unit, Offset(10f * unit, 18f * unit))
                 drawCircle(color, 3.5f * unit, Offset(17f * unit, 16f * unit))
+            }
+            LibraryGlyph.SPEAKER -> {
+                line(5f, 2f, 19f, 2f)
+                line(19f, 2f, 19f, 22f)
+                line(19f, 22f, 5f, 22f)
+                line(5f, 22f, 5f, 2f)
+                drawCircle(
+                    color = color,
+                    radius = 4f * unit,
+                    center = Offset(12f * unit, 16f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
+                drawCircle(
+                    color = color,
+                    radius = 2f * unit,
+                    center = Offset(12f * unit, 7f * unit)
+                )
+            }
+            LibraryGlyph.SETTINGS -> {
+                rect(10f, 2f, 4f, 4f)
+                rect(10f, 18f, 4f, 4f)
+                rect(2f, 10f, 4f, 4f)
+                rect(18f, 10f, 4f, 4f)
+                rect(4f, 4f, 4f, 4f)
+                rect(16f, 4f, 4f, 4f)
+                rect(4f, 16f, 4f, 4f)
+                rect(16f, 16f, 4f, 4f)
+                drawCircle(
+                    color = color,
+                    radius = 7f * unit,
+                    center = Offset(12f * unit, 12f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
+                drawCircle(
+                    color = color,
+                    radius = 3f * unit,
+                    center = Offset(12f * unit, 12f * unit),
+                    style = Stroke(width = 2f * unit)
+                )
             }
         }
     }

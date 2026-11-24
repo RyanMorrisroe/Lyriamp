@@ -29,6 +29,63 @@ enum class LmsLibraryQuery(
     )
 }
 
+enum class LmsLibrarySort(
+    internal val lmsKey: String,
+    internal val naturallyDescending: Boolean = false
+) {
+    ARTIST("artist"),
+    NEW("new", naturallyDescending = true),
+    PLAY_COUNT("playcount", naturallyDescending = true),
+    POPULAR("popular", naturallyDescending = true),
+    RECENTLY_PLAYED("recentlyplayed", naturallyDescending = true),
+    ALBUM("album"),
+    ARTIST_ALBUM("artistalbum"),
+    YEAR_ALBUM("yearalbum"),
+    YEAR_ARTIST_ALBUM("yearartistalbum"),
+    ART_FLOW("artflow"),
+    CHANGED("changed", naturallyDescending = true),
+    RANDOM("random"),
+    TITLE("title"),
+    TRACK_NUMBER("tracknum"),
+    ALBUM_TRACK("albumtrack")
+}
+
+enum class LmsLibrarySortOrder {
+    ASCENDING,
+    DESCENDING
+}
+
+fun LmsLibraryQuery.supportedSortOptions(): List<LmsLibrarySort> = when (this) {
+    LmsLibraryQuery.ARTISTS -> listOf(
+        LmsLibrarySort.ARTIST,
+        LmsLibrarySort.NEW,
+        LmsLibrarySort.PLAY_COUNT,
+        LmsLibrarySort.POPULAR,
+        LmsLibrarySort.RECENTLY_PLAYED
+    )
+    LmsLibraryQuery.ALBUMS -> listOf(
+        LmsLibrarySort.ALBUM,
+        LmsLibrarySort.ARTIST_ALBUM,
+        LmsLibrarySort.YEAR_ALBUM,
+        LmsLibrarySort.YEAR_ARTIST_ALBUM,
+        LmsLibrarySort.ART_FLOW,
+        LmsLibrarySort.NEW,
+        LmsLibrarySort.CHANGED,
+        LmsLibrarySort.PLAY_COUNT,
+        LmsLibrarySort.POPULAR,
+        LmsLibrarySort.RECENTLY_PLAYED,
+        LmsLibrarySort.RANDOM
+    )
+    LmsLibraryQuery.TRACKS,
+    LmsLibraryQuery.PLAYLIST_TRACKS -> listOf(
+        LmsLibrarySort.TITLE,
+        LmsLibrarySort.TRACK_NUMBER,
+        LmsLibrarySort.ALBUM_TRACK
+    )
+    LmsLibraryQuery.GENRES,
+    LmsLibraryQuery.PLAYLISTS -> emptyList()
+}
+
 data class LmsLibraryFilter(
     val artistId: String? = null,
     val albumId: String? = null,
@@ -47,7 +104,10 @@ data class LmsLibraryItem(
     val artworkId: String? = null,
     val artworkUrl: String? = null,
     val isContainer: Boolean = false,
-    val year: String? = null
+    val year: String? = null,
+    val albumId: String? = null,
+    val discNumber: Int? = null,
+    val trackNumber: Int? = null
 )
 
 data class LmsLibraryPage(
@@ -62,6 +122,17 @@ data class LmsLibrarySearchResults(
     val tracks: LmsLibraryPage
 )
 
+internal fun List<LmsLibraryItem>.sortedForAlbumTracks(): List<LmsLibraryItem> =
+    distinctBy { it.id }
+        .sortedWith(
+            compareBy<LmsLibraryItem>(
+                { it.discNumber?.takeIf { disc -> disc > 0 } ?: 1 }
+            ).thenBy {
+                it.trackNumber?.takeIf { track -> track > 0 } ?: Int.MAX_VALUE
+            }.thenBy { it.title.lowercase() }
+                .thenBy { it.id }
+        )
+
 interface LmsLibraryGateway {
     suspend fun getPage(
         connection: LmsServerConnection,
@@ -69,7 +140,8 @@ interface LmsLibraryGateway {
         offset: Int,
         limit: Int,
         filter: LmsLibraryFilter = LmsLibraryFilter(),
-        search: String? = null
+        search: String? = null,
+        sort: LmsLibrarySort? = null
     ): LmsLibraryPage
 
     suspend fun search(

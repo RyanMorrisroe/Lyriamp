@@ -119,10 +119,11 @@ class LmsJsonRpcClient(
         offset: Int,
         limit: Int,
         filter: LmsLibraryFilter,
-        search: String?
+        search: String?,
+        sort: LmsLibrarySort?
     ): LmsLibraryPage {
         validateLibraryPage(offset, limit)
-        val result = request(connection, "", libraryPageCommand(query, offset, limit, filter, search))
+        val result = request(connection, "", libraryPageCommand(query, offset, limit, filter, search, sort))
         val totalCount = result["count"].asInt()
             ?: throw LmsProtocolException("LMS response did not include a library result count.")
         return LmsLibraryPage(
@@ -133,7 +134,13 @@ class LmsJsonRpcClient(
                 query.itemType,
                 totalCount,
                 query == LmsLibraryQuery.PLAYLISTS
-            ),
+            ).map { item ->
+                if (query == LmsLibraryQuery.TRACKS && filter.albumId != null) {
+                    item.copy(albumId = item.albumId ?: filter.albumId)
+                } else {
+                    item
+                }
+            },
             offset = offset,
             totalCount = totalCount
         )
@@ -236,11 +243,55 @@ class LmsJsonRpcClient(
         item: LmsLibraryItem
     ) {
         require(!item.isContainer) { "A playlist folder cannot be played." }
-        request(
-            connection,
-            playerId,
-            playlistControlCommand("load", item.playlistControlFilterName(), item.id, item.playlistControlSort())
-        )
+        if (item.type == LmsLibraryItemType.TRACK && item.albumId != null) {
+            val albumTracks = getSortedAlbumTracks(connection, item.albumId)
+            request(
+                connection,
+                playerId,
+                playlistControlCommand("load", item.playlistControlFilterName(), item.id)
+            )
+            val selectedIndex = albumTracks.indexOfFirst { it.id == item.id }
+            if (selectedIndex >= 0) {
+                albumTracks.drop(selectedIndex + 1).forEach { laterTrack ->
+                    request(
+                        connection,
+                        playerId,
+                        playlistControlCommand("add", "track_id", laterTrack.id)
+                    )
+                }
+            }
+        } else {
+            request(
+                connection,
+                playerId,
+                playlistControlCommand("load", item.playlistControlFilterName(), item.id, item.playlistControlSort())
+            )
+        }
+    }
+
+    private suspend fun getSortedAlbumTracks(
+        connection: LmsServerConnection,
+        albumId: String
+    ): List<LmsLibraryItem> {
+        val tracks = mutableListOf<LmsLibraryItem>()
+        var offset = 0
+        var totalCount: Int? = null
+
+        while (totalCount == null || offset < totalCount) {
+            val page = getPage(
+                connection = connection,
+                query = LmsLibraryQuery.TRACKS,
+                offset = offset,
+                limit = 100,
+                filter = LmsLibraryFilter(albumId = albumId)
+            )
+            totalCount = page.totalCount
+            if (page.items.isEmpty()) break
+            tracks.addAll(page.items)
+            offset += page.items.size
+        }
+
+        return tracks.sortedForAlbumTracks()
     }
 
     override suspend fun getPlayerStatus(
@@ -560,7 +611,8 @@ class LmsJsonRpcClient(
         offset: Int,
         limit: Int,
         filter: LmsLibraryFilter,
-        search: String?
+        search: String?,
+        sort: LmsLibrarySort? = null
     ) = buildJsonArray {
         query.command.forEach { add(JsonPrimitive(it)) }
         add(JsonPrimitive(offset))
@@ -568,13 +620,18 @@ class LmsJsonRpcClient(
         when (query) {
             LmsLibraryQuery.ALBUMS -> add(JsonPrimitive("tags:aljKy"))
             LmsLibraryQuery.TRACKS,
-            LmsLibraryQuery.PLAYLIST_TRACKS -> add(JsonPrimitive("tags:galdeKJc"))
+            LmsLibraryQuery.PLAYLIST_TRACKS -> add(JsonPrimitive("tags:galdeitKJc"))
             LmsLibraryQuery.PLAYLISTS -> add(JsonPrimitive("tags:suxKJc"))
             LmsLibraryQuery.ARTISTS -> {
                 add(JsonPrimitive("tags:4"))
                 add(JsonPrimitive("role_id:ALBUMARTIST"))
             }
             LmsLibraryQuery.GENRES -> Unit
+        }
+        if (query == LmsLibraryQuery.TRACKS && filter.albumId != null) {
+            add(JsonPrimitive("sort:albumtrack"))
+        } else if (sort != null) {
+            add(JsonPrimitive("sort:${sort.lmsKey}"))
         }
         filter.toQueryParameters().forEach { add(JsonPrimitive(it)) }
         search?.takeIf(String::isNotBlank)?.let { add(JsonPrimitive("search:$it")) }
@@ -641,6 +698,14 @@ class LmsJsonRpcClient(
 
     private fun JsonObject.firstInt(vararg keys: String): Int? =
         keys.firstNotNullOfOrNull { key -> this[key].asInt() }
+
+    private fun JsonObject.firstTrackNumber(vararg keys: String): Int? =
+        keys.firstNotNullOfOrNull { key ->
+            this[key].asText()
+                ?.substringBefore('/')
+                ?.trim()
+                ?.toIntOrNull()
+        }
 
     private fun JsonObject.firstBoolean(vararg keys: String): Boolean? =
         keys.firstNotNullOfOrNull { key -> this[key].asBoolean() }
@@ -724,7 +789,12 @@ class LmsJsonRpcClient(
                 this["type"].asText() == "folder" ||
                     id.startsWith("file:", ignoreCase = true) || '/' in id || '\\' in id
                 ),
-            year = this["year"].asText()?.takeIf(String::isNotBlank)
+            year = this["year"].asText()?.takeIf(String::isNotBlank),
+            albumId = this["album_id"].asText()
+                ?: this["albumid"].asText()
+                ?: this["albumId"].asText(),
+            discNumber = firstInt("disc", "discnumber", "disc_number"),
+            trackNumber = firstTrackNumber("tracknum", "tracknumber", "track_number", "track")
         )
     }
 

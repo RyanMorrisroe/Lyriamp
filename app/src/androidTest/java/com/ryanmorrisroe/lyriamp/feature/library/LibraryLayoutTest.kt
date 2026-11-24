@@ -28,6 +28,7 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryPage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySearchResults
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySort
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlaybackMode
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayer
 import com.ryanmorrisroe.lyriamp.data.lms.LmsPlayerCommand
@@ -46,6 +47,7 @@ import com.ryanmorrisroe.lyriamp.data.persistence.Appearance
 import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferences
 import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferencesRepository
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryLayout
+import com.ryanmorrisroe.lyriamp.data.persistence.LibrarySortPreference
 import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import com.ryanmorrisroe.lyriamp.feature.connection.ConnectionViewModel
 import com.ryanmorrisroe.lyriamp.feature.settings.DisplayPreferencesViewModel
@@ -175,6 +177,13 @@ class LibraryLayoutTest {
             .assertWidthIsEqualTo(40.dp)
         compose.onNodeWithTag("library-layout-glyph-COVER_WALL", useUnmergedTree = true)
             .assertWidthIsEqualTo(22.dp)
+        compose.onNodeWithTag("library-sort-chip").assertExists()
+        compose.onNodeWithTag("library-sort-chip").performClick()
+        compose.onNodeWithTag("library-sort-by").performClick()
+        compose.onNodeWithText("Artist/Album", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("Artist/Album", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("library-sort-order").performClick()
+        compose.onNodeWithText("Descending", useUnmergedTree = true).assertExists()
 
         compose.onAllNodesWithText("Songs").onFirst().performClick()
         compose.waitUntil(10_000) {
@@ -510,6 +519,9 @@ class LibraryLayoutTest {
         override suspend fun setLayout(type: LibraryViewType, layout: LibraryLayout) {
             value.update { it.copy(layouts = it.layouts + (type to layout)) }
         }
+        override suspend fun setSort(type: LibraryViewType, preference: LibrarySortPreference) {
+            value.update { it.copy(sorts = it.sorts + (type to preference)) }
+        }
     }
 
     private class FakeLibrary : LmsLibraryGateway {
@@ -523,7 +535,8 @@ class LibraryLayoutTest {
             offset: Int,
             limit: Int,
             filter: LmsLibraryFilter,
-            search: String?
+            search: String?,
+            sort: LmsLibrarySort?
         ): LmsLibraryPage {
             requests.add(query to offset)
             val type = when (query) {

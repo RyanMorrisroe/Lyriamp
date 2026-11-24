@@ -13,8 +13,16 @@ import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryItemType
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryPage
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibraryQuery
 import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySearchResults
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySort
+import com.ryanmorrisroe.lyriamp.data.lms.LmsLibrarySortOrder
+import com.ryanmorrisroe.lyriamp.data.persistence.LibrarySortPreference
+import com.ryanmorrisroe.lyriamp.data.persistence.LibraryViewType
 import com.ryanmorrisroe.lyriamp.data.persistence.LastSessionScrollAnchor
 import com.ryanmorrisroe.lyriamp.data.lms.LmsServerConnection
+import com.ryanmorrisroe.lyriamp.data.persistence.Appearance
+import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferences
+import com.ryanmorrisroe.lyriamp.data.persistence.DisplayPreferencesRepository
+import com.ryanmorrisroe.lyriamp.data.persistence.LibraryLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -23,6 +31,8 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -84,6 +94,54 @@ class LibraryViewModelTest {
             advanceUntilIdle()
             assertEquals(songLocations, restored.uiState.value.locationStack)
             assertEquals(songAnchor, restored.uiState.value.scrollAnchor)
+        }
+    }
+
+    @Test
+    fun albumTrackNavigationCreatesTheDedicatedPagingSourceAndKeepsLocationMatching() {
+        runLibraryViewModelTest {
+            val gateway = FakeLibraryGateway()
+            val playerStore = LmsActivePlayerStore().apply { select(activePlayer()) }
+            val viewModel = LibraryViewModel(gateway, playerStore)
+
+            viewModel.selectTab(LibraryTab.ALBUMS)
+            viewModel.openItem(LmsLibraryItem("album-1", LmsLibraryItemType.ALBUM, "Album"))
+            advanceUntilIdle()
+            val locations = viewModel.uiState.value.locationStack
+            assertTrue(viewModel.isCurrentLocation(locations, ""))
+            viewModel.updateScrollAnchor(
+                LastSessionScrollAnchor(libraryLocationKey(locations), "", "track-1", 1, 0)
+            )
+            viewModel.items.first()
+            advanceUntilIdle()
+
+            viewModel.navigateBack()
+            advanceUntilIdle()
+            assertEquals(LibraryTab.ALBUMS, viewModel.currentTab())
+        }
+    }
+
+    @Test
+    fun openMetadataItemHandlesUnsupportedNoPlayerAndLookupFailure() {
+        runLibraryViewModelTest {
+            val gateway = FakeLibraryGateway()
+            val noPlayerViewModel = LibraryViewModel(gateway, LmsActivePlayerStore())
+            assertThrows(IllegalArgumentException::class.java) {
+                noPlayerViewModel.openMetadataItem(LmsLibraryItemType.TRACK, "Track")
+            }
+            noPlayerViewModel.openMetadataItem(LmsLibraryItemType.ARTIST, "Artist")
+            advanceUntilIdle()
+            assertEquals("Artist", noPlayerViewModel.uiState.value.searchText)
+
+            gateway.pageError = IllegalStateException("offline")
+            val playerStore = LmsActivePlayerStore().apply { select(activePlayer()) }
+            val playerViewModel = LibraryViewModel(gateway, playerStore)
+            playerViewModel.openMetadataItem(LmsLibraryItemType.ALBUM, "Album")
+            advanceUntilIdle()
+            assertEquals("Album", playerViewModel.uiState.value.searchText)
+            assertTrue(
+                playerViewModel.uiState.value.message?.contains("Could not verify") == true
+            )
         }
     }
 
@@ -355,6 +413,199 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun albumTrackPagingSortsByDiscThenTrack() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            page = LmsLibraryPage(
+                items = listOf(
+                    LmsLibraryItem(
+                        "22", LmsLibraryItemType.TRACK, "Disc 2 Track 2",
+                        discNumber = 2, trackNumber = 2
+                    ),
+                    LmsLibraryItem(
+                        "12", LmsLibraryItemType.TRACK, "Disc 1 Track 2",
+                        discNumber = 1, trackNumber = 2
+                    ),
+                    LmsLibraryItem(
+                        "21", LmsLibraryItemType.TRACK, "Disc 2 Track 1",
+                        discNumber = 2, trackNumber = 1
+                    ),
+                    LmsLibraryItem(
+                        "11", LmsLibraryItemType.TRACK, "Disc 1 Track 1",
+                        discNumber = 1, trackNumber = 1
+                    )
+                ),
+                offset = 0,
+                totalCount = 4
+            )
+        }
+        val source = LmsAlbumTracksPagingSource(
+            gateway,
+            activePlayer(),
+            LmsLibraryFilter(albumId = "42")
+        )
+
+        val result = source.load(PagingSource.LoadParams.Refresh(null, 30, false))
+
+        assertTrue(result is PagingSource.LoadResult.Page)
+        val page = result as PagingSource.LoadResult.Page
+        assertEquals(listOf("11", "12", "21", "22"), page.data.map { it.id })
+        assertEquals(0, page.itemsBefore)
+        assertEquals(0, page.itemsAfter)
+        assertEquals(100, gateway.requestedLimit)
+    }
+
+    @Test
+    fun albumTrackPagingFallsBackWithoutDiscOrTrackMetadata() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            page = LmsLibraryPage(
+                items = listOf(
+                    LmsLibraryItem("unknown", LmsLibraryItemType.TRACK, "Unknown"),
+                    LmsLibraryItem(
+                        "12",
+                        LmsLibraryItemType.TRACK,
+                        "Disc 1 Track 2",
+                        discNumber = 1,
+                        trackNumber = 2
+                    ),
+                    LmsLibraryItem(
+                        "11",
+                        LmsLibraryItemType.TRACK,
+                        "Disc 1 Track 1",
+                        discNumber = 1,
+                        trackNumber = 1
+                    )
+                ),
+                offset = 0,
+                totalCount = 3
+            )
+        }
+        val source = LmsAlbumTracksPagingSource(
+            gateway,
+            activePlayer(),
+            LmsLibraryFilter(albumId = "42")
+        )
+
+        val result = source.load(PagingSource.LoadParams.Refresh(null, 30, false))
+
+        assertTrue(result is PagingSource.LoadResult.Page)
+        val page = result as PagingSource.LoadResult.Page
+        assertEquals(listOf("11", "12", "unknown"), page.data.map { it.id })
+    }
+
+    @Test
+    fun descendingAlbumPagingRequestsAndReversesLmsPages() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            pageHandler = { offset, limit ->
+                val items = when (offset) {
+                    0 -> if (limit == 1) {
+                        listOf(LmsLibraryItem("A", LmsLibraryItemType.ALBUM, "A"))
+                    } else {
+                        listOf(
+                            LmsLibraryItem("A", LmsLibraryItemType.ALBUM, "A"),
+                            LmsLibraryItem("B", LmsLibraryItemType.ALBUM, "B")
+                        )
+                    }
+                    3 -> listOf(
+                        LmsLibraryItem("D", LmsLibraryItemType.ALBUM, "D"),
+                        LmsLibraryItem("E", LmsLibraryItemType.ALBUM, "E")
+                    )
+                    1 -> listOf(
+                        LmsLibraryItem("B", LmsLibraryItemType.ALBUM, "B"),
+                        LmsLibraryItem("C", LmsLibraryItemType.ALBUM, "C")
+                    )
+                    else -> emptyList()
+                }
+                LmsLibraryPage(items, offset, 5)
+            }
+        }
+        val source = LmsLibraryPagingSource(
+            gateway,
+            activePlayer(),
+            LmsLibraryQuery.ALBUMS,
+            LmsLibraryFilter(),
+            LibrarySortPreference(LmsLibrarySort.ALBUM, LmsLibrarySortOrder.DESCENDING)
+        )
+
+        val first = source.load(PagingSource.LoadParams.Refresh(null, 2, false))
+        assertTrue(first is PagingSource.LoadResult.Page)
+        val firstPage = first as PagingSource.LoadResult.Page
+        assertEquals(listOf("E", "D"), firstPage.data.map { it.id })
+        assertEquals(0, firstPage.itemsBefore)
+        assertEquals(3, firstPage.itemsAfter)
+        assertEquals(2, firstPage.nextKey)
+        assertEquals(LmsLibrarySort.ALBUM, gateway.requestedSort)
+        assertEquals(3, gateway.requestedOffset)
+
+        val second = source.load(PagingSource.LoadParams.Append(2, 2, false))
+        assertTrue(second is PagingSource.LoadResult.Page)
+        val secondPage = second as PagingSource.LoadResult.Page
+        assertEquals(listOf("C", "B"), secondPage.data.map { it.id })
+        assertEquals(2, secondPage.itemsBefore)
+        assertEquals(1, secondPage.itemsAfter)
+        assertEquals(4, secondPage.nextKey)
+    }
+
+    @Test
+    fun ascendingNewAlbumPagingReversesNaturallyDescendingLmsResults() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            pageHandler = { offset, limit ->
+                val items = if (offset == 3 && limit == 2) {
+                    listOf(
+                        LmsLibraryItem("D", LmsLibraryItemType.ALBUM, "D"),
+                        LmsLibraryItem("E", LmsLibraryItemType.ALBUM, "E")
+                    )
+                } else if (offset == 0 && limit == 1) {
+                    listOf(LmsLibraryItem("A", LmsLibraryItemType.ALBUM, "A"))
+                } else {
+                    emptyList()
+                }
+                LmsLibraryPage(items, offset, 5)
+            }
+        }
+        val source = LmsLibraryPagingSource(
+            gateway,
+            activePlayer(),
+            LmsLibraryQuery.ALBUMS,
+            LmsLibraryFilter(),
+            LibrarySortPreference(LmsLibrarySort.NEW, LmsLibrarySortOrder.ASCENDING)
+        )
+
+        val result = source.load(PagingSource.LoadParams.Refresh(null, 2, false))
+
+        assertTrue(result is PagingSource.LoadResult.Page)
+        val page = result as PagingSource.LoadResult.Page
+        assertEquals(listOf("E", "D"), page.data.map { it.id })
+        assertEquals(2, page.nextKey)
+        assertEquals(3, gateway.requestedOffset)
+        assertEquals(LmsLibrarySort.NEW, gateway.requestedSort)
+    }
+
+    @Test
+    fun reversedPagingStopsForAnEmptySortedCollection() = runTest {
+        val gateway = FakeLibraryGateway().apply {
+            pageHandler = { offset, limit ->
+                LmsLibraryPage(emptyList(), offset, 0)
+            }
+        }
+        val source = LmsLibraryPagingSource(
+            gateway,
+            activePlayer(),
+            LmsLibraryQuery.ALBUMS,
+            LmsLibraryFilter(),
+            LibrarySortPreference(LmsLibrarySort.NEW, LmsLibrarySortOrder.ASCENDING)
+        )
+
+        val result = source.load(PagingSource.LoadParams.Refresh(null, 30, false))
+
+        assertTrue(result is PagingSource.LoadResult.Page)
+        val page = result as PagingSource.LoadResult.Page
+        assertTrue(page.data.isEmpty())
+        assertEquals(null, page.nextKey)
+        assertEquals(0, page.itemsBefore)
+        assertEquals(0, page.itemsAfter)
+    }
+
+    @Test
     fun browsePagingUsesReturnedItemCountAsTheNextOffset() = runTest {
         val gateway = FakeLibraryGateway().apply {
             page = LmsLibraryPage(
@@ -586,6 +837,38 @@ class LibraryViewModelTest {
     }
 
     @Test
+    fun libraryViewModelObservesSavedSortPreferences() {
+        runLibraryViewModelTest {
+            val repository = FakeDisplayPreferencesRepository()
+            val viewModel = LibraryViewModel(
+                FakeLibraryGateway(),
+                LmsActivePlayerStore(),
+                repository
+            )
+
+            repository.setSort(
+                LibraryViewType.ALBUMS,
+                LibrarySortPreference(LmsLibrarySort.YEAR_ALBUM, LmsLibrarySortOrder.DESCENDING)
+            )
+            advanceUntilIdle()
+            assertEquals(
+                LibrarySortPreference(LmsLibrarySort.YEAR_ALBUM, LmsLibrarySortOrder.DESCENDING),
+                repository.observe().first().sortFor(LibraryViewType.ALBUMS)
+            )
+
+            repository.setSort(
+                LibraryViewType.SONGS,
+                LibrarySortPreference(LmsLibrarySort.TRACK_NUMBER)
+            )
+            advanceUntilIdle()
+            assertEquals(
+                LibrarySortPreference(LmsLibrarySort.TRACK_NUMBER),
+                repository.observe().first().sortFor(LibraryViewType.SONGS)
+            )
+        }
+    }
+
+    @Test
     fun factoryCreatesLibraryViewModelAndRejectsUnsupportedTypes() {
         val factory = LibraryViewModel.Factory(FakeLibraryGateway(), LmsActivePlayerStore())
 
@@ -595,8 +878,27 @@ class LibraryViewModelTest {
         }
     }
 
+    private class FakeDisplayPreferencesRepository : DisplayPreferencesRepository {
+        private val value = MutableStateFlow(DisplayPreferences())
+
+        override fun observe() = value
+
+        override suspend fun setAppearance(appearance: Appearance) {
+            value.update { it.copy(appearance = appearance) }
+        }
+
+        override suspend fun setLayout(type: LibraryViewType, layout: LibraryLayout) {
+            value.update { it.copy(layouts = it.layouts + (type to layout)) }
+        }
+
+        override suspend fun setSort(type: LibraryViewType, preference: LibrarySortPreference) {
+            value.update { it.copy(sorts = it.sorts + (type to preference)) }
+        }
+    }
+
     private class FakeLibraryGateway : LmsLibraryGateway {
         var page = LmsLibraryPage(emptyList(), 0, 0)
+        var pageHandler: (suspend (Int, Int) -> LmsLibraryPage)? = null
         var searchResults = LmsLibrarySearchResults(page, page, page)
         var searchHandler: suspend (Int, Int) -> LmsLibrarySearchResults = { _, _ -> searchResults }
         val searchRequests = mutableListOf<Pair<Int, Int>>()
@@ -608,6 +910,7 @@ class LibraryViewModelTest {
         var artistArtworkRequestCount = 0
         var requestedQuery: LmsLibraryQuery? = null
         var requestedSearch: String? = null
+        var requestedSort: LmsLibrarySort? = null
         var pageError: Exception? = null
         var playNowError: Exception? = null
 
@@ -617,14 +920,16 @@ class LibraryViewModelTest {
             offset: Int,
             limit: Int,
             filter: LmsLibraryFilter,
-            search: String?
+            search: String?,
+            sort: LmsLibrarySort?
         ): LmsLibraryPage {
             pageError?.let { throw it }
             requestedQuery = query
             requestedSearch = search
+            requestedSort = sort
             requestedOffset = offset
             requestedLimit = limit
-            return page.copy(offset = offset)
+            return pageHandler?.invoke(offset, limit) ?: page.copy(offset = offset)
         }
 
         override suspend fun search(

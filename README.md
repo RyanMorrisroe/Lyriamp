@@ -12,6 +12,7 @@ Lyriamp is a native Android remote controller for [Lyrion Music Server (LMS)](ht
 - Save named multi-player groups per LMS server, select them for synchronized playback, and delete presets without changing live sync.
 - Browse Home, artists, albums, genres, and songs in tabs with bounded infinite scrolling. Playlist browsing is temporarily hidden.
 - Choose artwork-grid, compact, or comfortable layouts for artists, albums, and genres; songs and search offer compact and comfortable lists. Layout choices are remembered separately by type.
+- Sort artists, albums, and songs with LMS-supported options and ascending or descending order. Sort choices are remembered separately by item type.
 - Search artists, albums, and tracks across the library, and view LMS artwork when available.
 - Choose light, dark, or system appearance under Settings; colors follow the device's Android palette.
 - Play a track or album now on the selected LMS player group; playback remains on the LMS players.
